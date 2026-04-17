@@ -1,11 +1,24 @@
 import * as strands from '@strands-agents/sdk'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import express, { type Request, type Response } from 'express'
 import { calculatorTool } from './tools/calculator'
 import { evmBalanceTool } from './tools/evm-balance'
 import { letterCounterTool } from './tools/letter-counter'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const app = express()
 const PORT = process.env.PORT || 8080
+
+// MCP client connecting to our crypto-tools server via stdio
+const cryptoMcp = new strands.McpClient({
+  transport: new StdioClientTransport({
+    command: 'node',
+    args: [resolve(__dirname, 'mcp-server.js')],
+  }),
+})
 
 const agent = new strands.Agent({
   systemPrompt: `speak like a caveman`,
@@ -13,7 +26,7 @@ const agent = new strands.Agent({
     region: process.env.AWS_REGION || 'us-east-1',
     modelId: process.env.BEDROCK_MODEL_ID || 'global.anthropic.claude-sonnet-4-6',
   }),
-  tools: [calculatorTool, letterCounterTool, evmBalanceTool],
+  tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoMcp],
 })
 
 // Health check endpoint (REQUIRED)
@@ -48,4 +61,10 @@ app.listen(PORT, () => {
   console.log(`📍 Endpoints:`)
   console.log(`   POST http://0.0.0.0:${PORT}/invocations`)
   console.log(`   GET  http://0.0.0.0:${PORT}/ping`)
+})
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  await cryptoMcp.disconnect()
+  process.exit(0)
 })
