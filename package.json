@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "start": "npm run build && dotenvx run -f .env -- node dist/index.js"
+    "start": "npm run build && dotenvx run -f .env -- node dist/index.js",
+    "mcp:http": "dotenvx run -f .env -- tsx src/mcp-server-http.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-agentcore": "latest",
