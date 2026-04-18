@@ -8,13 +8,12 @@ set -e
 # Get AWS Account ID and Region
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION=${AWS_REGION:-us-east-1}
+ROLE_NAME=${ROLE_NAME:-PocStrandsAgentsBedrockAgentCoreRuntimeRole}
 
 echo "Creating IAM role for Bedrock AgentCore Runtime..."
 echo "Account ID: ${ACCOUNT_ID}"
 echo "Region: ${REGION}"
-
-# Role name
-ROLE_NAME="PocStrandsAgentsBedrockAgentCoreRuntimeRole"
+echo "Role Name: ${ROLE_NAME}"
 
 # Create trust policy document
 TRUST_POLICY=$(cat <<EOF

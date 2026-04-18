@@ -1,4 +1,3 @@
-# FROM --platform=linux/arm64 public.ecr.aws/docker/library/node:latest
 FROM public.ecr.aws/docker/library/node:latest
 
 WORKDIR /app

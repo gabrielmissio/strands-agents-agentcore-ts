@@ -19,10 +19,12 @@ const cryptoToolsMcp = new strands.McpClient({
   }),
 })
 
-const exchangeRateMcp = new strands.McpClient({
-  transport: new StreamableHTTPClientTransport(
-    new URL(process.env.EXCHANGE_RATE_MCP_URL || 'http://localhost:8081/mcp')),
-})
+const exchangeRateMcp = process.env.EXCHANGE_RATE_MCP_URL
+  ? new strands.McpClient({
+      transport: new StreamableHTTPClientTransport(
+        new URL(process.env.EXCHANGE_RATE_MCP_URL)),
+    })
+  : null
 
 export const agent = new strands.Agent({
   systemPrompt: `speak like a caveman`,
@@ -30,7 +32,7 @@ export const agent = new strands.Agent({
     region: process.env.AWS_REGION || 'us-east-1',
     modelId: process.env.BEDROCK_MODEL_ID || 'global.anthropic.claude-sonnet-4-6',
   }),
-  tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoToolsMcp, exchangeRateMcp],
+  tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoToolsMcp, ...(exchangeRateMcp ? [exchangeRateMcp] : [])],
 })
 
 // Graceful shutdown
