@@ -15,8 +15,12 @@
     "@dotenvx/dotenvx": "^1.61.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@strands-agents/sdk": "latest",
+    "@x402/axios": "^2.10.0",
+    "@x402/evm": "^2.10.0",
+    "axios": "^1.15.0",
     "ethers": "^6.16.0",
     "express": "^5.2.1",
+    "viem": "^2.48.1",
     "zod": "^4.1.12"
   },
   "devDependencies": {

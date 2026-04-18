@@ -11,7 +11,6 @@ import { dirname, resolve } from 'node:path'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
-// MCP client connecting to our crypto-tools server via stdio
 const cryptoToolsMcp = new strands.McpClient({
   transport: new StdioClientTransport({
     command: 'node',
@@ -26,17 +25,27 @@ const exchangeRateMcp = process.env.EXCHANGE_RATE_MCP_URL
     })
   : null
 
+const oraculoDoBichoMcp = new strands.McpClient({
+  transport: new StdioClientTransport({
+    command: 'node',
+    args: [resolve(__dirname, './mcp-servers/x402-mcp-server.js')],
+    env: process.env as Record<string, string>,
+  }),
+})
+
 export const agent = new strands.Agent({
   systemPrompt: `speak like a caveman`,
   model: new strands.BedrockModel({
     region: process.env.AWS_REGION || 'us-east-1',
     modelId: process.env.BEDROCK_MODEL_ID || 'global.anthropic.claude-sonnet-4-6',
   }),
-  tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoToolsMcp, ...(exchangeRateMcp ? [exchangeRateMcp] : [])],
+  tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoToolsMcp, oraculoDoBichoMcp, ...(exchangeRateMcp ? [exchangeRateMcp] : [])],
 })
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   await cryptoToolsMcp.disconnect()
+  await oraculoDoBichoMcp.disconnect()
+  if (exchangeRateMcp) await exchangeRateMcp.disconnect()
   process.exit(0)
 })
