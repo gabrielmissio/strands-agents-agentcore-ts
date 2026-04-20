@@ -198,6 +198,31 @@ aws bedrock-agentcore-control update-agent-runtime \
   --region ${AWS_REGION}
 ```
 
+#### Configure JWT Authorization (Cognito)
+
+By default the runtime uses SigV4 (IAM) auth. To allow the frontend to call the agent directly with a Cognito JWT token, configure the `customJWTAuthorizer`:
+
+1. **Get your Cognito values** (from the `infra/` CDK stack outputs):
+   - `DISCOVERY_URL` — OIDC discovery URL (e.g. `https://cognito-idp.<region>.amazonaws.com/<user-pool-id>/.well-known/openid-configuration`)
+   - `CLIENT_ID` — Cognito User Pool Client ID
+
+2. **Update the runtime** with JWT authorizer:
+
+```bash
+aws bedrock-agentcore-control update-agent-runtime \
+  --agent-runtime-id ${AGENT_RUNTIME_ID} \
+  --agent-runtime-artifact containerConfiguration={containerUri=${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest} \
+  --role-arn ${ROLE_ARN} \
+  --network-configuration networkMode=PUBLIC \
+  --authorizer-configuration '{"customJWTAuthorizer":{"discoveryUrl":"'"${DISCOVERY_URL}"'","allowedClients":["'"${CLIENT_ID}"'"]}}' \
+  --environment-variables '{"BEDROCK_MODEL_ID":"amazon.nova-pro-v1:0"}' \
+  --region ${AWS_REGION}
+```
+
+> **Important:**
+> - Use `allowedClients` (not `allowedAudience`). Cognito access tokens carry the client ID in the `client_id` claim, not `aud`.
+> - Always include `--environment-variables` in every update call — omitting it will **clear** all env vars from the runtime.
+
 #### Update environment variables (e.g. change the model)
 
 Use `--environment-variables` on `update-agent-runtime`. Note: this is a **full replacement** — include every variable you want to keep.

@@ -3,7 +3,7 @@ import { Send, Sparkles } from 'lucide-react'
 import cavemanMascot from '@/assets/caveman-mascot.png'
 import { ChatBubble, type ChatMessage } from './ChatBubble.tsx'
 import { ThinkingBubble } from './ThinkingBubble.tsx'
-import { sendMessage } from '@/lib/api.ts'
+import { sendMessage, sendMessageDirect, AGENT_MODE } from '@/lib/api.ts'
 
 const SUGGESTIONS = [
   { icon: '🪨', label: 'Validate address', prompt: 'Validate 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0' },
@@ -38,20 +38,111 @@ export function ChatExperience() {
     setInput('')
     setThinking(true)
 
-    try {
-      const reply = await sendMessage(trimmed, sessionId)
-      setSessionId(reply.sessionId)
+    // Ensure we have a session id
+    const currentSessionId = sessionId ?? crypto.randomUUID()
+    if (!sessionId) setSessionId(currentSessionId)
+
+    if (AGENT_MODE === 'direct') {
+      // ── Direct-to-AgentCore (streaming) ──
+      const agentMsgId = crypto.randomUUID()
+      const toolsUsed: string[] = []
+
+      // Add placeholder streaming message
       setMessages((m) => [
         ...m,
-        { id: crypto.randomUUID(), role: 'agent', content: reply.content },
+        { id: agentMsgId, role: 'agent', content: '', isStreaming: true, status: 'Connecting...', toolsUsed: [] },
       ])
-    } catch {
-      setMessages((m) => [
-        ...m,
-        { id: crypto.randomUUID(), role: 'agent', content: 'UGH! Rock fall on head. Me no can answer right now. Try again!' },
-      ])
-    } finally {
-      setThinking(false)
+
+      try {
+        await sendMessageDirect(trimmed, currentSessionId, {
+          onToken: (token) => {
+            setMessages((m) =>
+              m.map((msg) =>
+                msg.id === agentMsgId
+                  ? { ...msg, content: msg.content + token, status: 'Streaming...' }
+                  : msg,
+              ),
+            )
+          },
+          onToolStart: (toolName) => {
+            if (!toolsUsed.includes(toolName)) toolsUsed.push(toolName)
+            setMessages((m) =>
+              m.map((msg) =>
+                msg.id === agentMsgId
+                  ? { ...msg, toolsUsed: [...toolsUsed], activeTool: toolName, status: `Using ${toolName}` }
+                  : msg,
+              ),
+            )
+          },
+          onThinking: () => {
+            setMessages((m) =>
+              m.map((msg) =>
+                msg.id === agentMsgId
+                  ? { ...msg, status: 'Thinking...' }
+                  : msg,
+              ),
+            )
+          },
+          onStatus: (status) => {
+            setMessages((m) =>
+              m.map((msg) =>
+                msg.id === agentMsgId ? { ...msg, status } : msg,
+              ),
+            )
+          },
+          onComplete: () => {
+            setMessages((m) =>
+              m.map((msg) =>
+                msg.id === agentMsgId
+                  ? { ...msg, isStreaming: false, activeTool: undefined, status: undefined }
+                  : msg,
+              ),
+            )
+          },
+          onError: (error) => {
+            setMessages((m) =>
+              m.map((msg) =>
+                msg.id === agentMsgId
+                  ? {
+                      ...msg,
+                      content: msg.content || `UGH! ${error.message}`,
+                      isStreaming: false,
+                      activeTool: undefined,
+                      status: undefined,
+                    }
+                  : msg,
+              ),
+            )
+          },
+        })
+      } catch {
+        setMessages((m) =>
+          m.map((msg) =>
+            msg.id === agentMsgId
+              ? { ...msg, content: msg.content || 'UGH! Rock fall on head. Me no can answer right now. Try again!', isStreaming: false, status: undefined }
+              : msg,
+          ),
+        )
+      } finally {
+        setThinking(false)
+      }
+    } else {
+      // ── BFF mode (original, non-streaming) ──
+      try {
+        const reply = await sendMessage(trimmed, sessionId)
+        setSessionId(reply.sessionId)
+        setMessages((m) => [
+          ...m,
+          { id: crypto.randomUUID(), role: 'agent', content: reply.content },
+        ])
+      } catch {
+        setMessages((m) => [
+          ...m,
+          { id: crypto.randomUUID(), role: 'agent', content: 'UGH! Rock fall on head. Me no can answer right now. Try again!' },
+        ])
+      } finally {
+        setThinking(false)
+      }
     }
   }
 
