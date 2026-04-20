@@ -13,12 +13,12 @@
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-agentcore": "latest",
-    "@aws-sdk/client-cognito-identity-provider": "^3.1032.0",
     "@dotenvx/dotenvx": "^1.61.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@strands-agents/sdk": "latest",
     "@x402/axios": "^2.10.0",
     "@x402/evm": "^2.10.0",
+    "amazon-cognito-identity-js": "^6.3.16",
     "axios": "^1.15.0",
     "ethers": "^6.16.0",
     "express": "^5.2.1",

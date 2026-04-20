@@ -1,69 +1,108 @@
-import {
-  CognitoIdentityProviderClient,
-  InitiateAuthCommand,
-} from '@aws-sdk/client-cognito-identity-provider'
+import { CognitoUserPool, CognitoUser, AuthenticationDetails } from 'amazon-cognito-identity-js'
+import { BedrockAgentCoreClient, InvokeAgentRuntimeCommand } from '@aws-sdk/client-bedrock-agentcore'
 import { randomUUID } from 'node:crypto'
 
 // ── Config ──────────────────────────────────────────────────────────────
 const agentRuntimeArn = process.env.AGENT_RUNTIME_ARN
 const region = process.env.AWS_REGION || 'us-east-1'
-const cognitoClientId = process.env.COGNITO_CLIENT_ID
-const cognitoUsername = process.env.COGNITO_USERNAME
-const cognitoPassword = process.env.COGNITO_PASSWORD
+const authMode = (process.env.INVOKE_AUTH_MODE || 'jwt').toLowerCase() // 'jwt' | 'sigv4'
 
 if (!agentRuntimeArn) {
   console.error('Error: AGENT_RUNTIME_ARN environment variable is not set.')
   process.exit(1)
 }
-if (!cognitoClientId || !cognitoUsername || !cognitoPassword) {
-  console.error('Error: COGNITO_CLIENT_ID, COGNITO_USERNAME, and COGNITO_PASSWORD must be set.')
-  process.exit(1)
-}
 
 const inputText = 'Tell me what tools/skills you have and can use to help me.'
+const sessionId = randomUUID()
 
-// OBS: temporarily enable USER_PASSWORD_AUTH flow for testing, but in production you should use a more secure auth flow (e.g. Authorization Code Grant with PKCE)
-// ── Get Cognito access token ────────────────────────────────────────────
-const cognito = new CognitoIdentityProviderClient({ region })
-const authResult = await cognito.send(
-  new InitiateAuthCommand({
-    AuthFlow: 'USER_PASSWORD_AUTH',
-    ClientId: cognitoClientId,
-    AuthParameters: {
-      USERNAME: cognitoUsername,
-      PASSWORD: cognitoPassword,
-    },
-  }),
-)
-const accessToken = authResult.AuthenticationResult?.AccessToken
-if (!accessToken) {
-  console.error('Error: Failed to get access token from Cognito.')
-  process.exit(1)
+// ── Auth helpers ────────────────────────────────────────────────────────
+
+/** Authenticate via Cognito SRP (password never leaves the client) */
+function getCognitoAccessToken(): Promise<string> {
+  const userPoolId = process.env.COGNITO_USER_POOL_ID
+  const clientId = process.env.COGNITO_CLIENT_ID
+  const username = process.env.COGNITO_USERNAME
+  const password = process.env.COGNITO_PASSWORD
+
+  if (!userPoolId || !clientId || !username || !password) {
+    console.error('Error: COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, COGNITO_USERNAME, and COGNITO_PASSWORD must be set for JWT auth.')
+    process.exit(1)
+  }
+
+  return new Promise((resolve, reject) => {
+    const pool = new CognitoUserPool({ UserPoolId: userPoolId, ClientId: clientId })
+    const user = new CognitoUser({ Username: username, Pool: pool })
+    const authDetails = new AuthenticationDetails({ Username: username, Password: password })
+
+    user.authenticateUser(authDetails, {
+      onSuccess: (session) => resolve(session.getAccessToken().getJwtToken()),
+      onFailure: (err) => reject(err),
+    })
+  })
 }
-console.log('✅ Got Cognito access token')
 
-// ── Invoke agent via REST (JWT auth) ────────────────────────────────────
-const escapedArn = encodeURIComponent(agentRuntimeArn)
-const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${escapedArn}/invocations?qualifier=DEFAULT`
+/** Invoke via JWT (Cognito SRP) — REST call with Bearer token */
+async function invokeWithJwt(): Promise<Response> {
+  const accessToken = await getCognitoAccessToken()
+  console.log('✅ Got Cognito access token (SRP)')
 
-const response = await fetch(url, {
-  method: 'POST',
-  headers: {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-    'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': randomUUID(),
-  },
-  body: inputText,
-})
+  const escapedArn = encodeURIComponent(agentRuntimeArn!)
+  const url = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${escapedArn}/invocations?qualifier=DEFAULT`
 
-if (!response.ok) {
-  const errorText = await response.text()
-  console.error(`HTTP ${response.status}: ${errorText}`)
-  process.exit(1)
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
+    },
+    body: inputText,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    console.error(`HTTP ${response.status}: ${errorText}`)
+    process.exit(1)
+  }
+
+  return response
+}
+
+/** Invoke via SigV4 — uses the AWS SDK with IAM credentials */
+async function invokeWithSigV4(): Promise<ReadableStream<Uint8Array>> {
+  const client = new BedrockAgentCoreClient({ region })
+  const command = new InvokeAgentRuntimeCommand({
+    agentRuntimeArn: agentRuntimeArn!,
+    qualifier: 'DEFAULT',
+    runtimeSessionId: sessionId,
+    payload: new TextEncoder().encode(inputText),
+  })
+
+  console.log('✅ Invoking agent via SigV4 (IAM credentials)')
+  const result = await client.send(command)
+
+  if (!result.response) {
+    console.error('Error: No response body from agent.')
+    process.exit(1)
+  }
+
+  return result.response as unknown as ReadableStream<Uint8Array>
+}
+
+// ── Invoke ──────────────────────────────────────────────────────────────
+console.log(`Auth mode: ${authMode}`)
+
+let stream: ReadableStream<Uint8Array>
+
+if (authMode === 'sigv4') {
+  stream = await invokeWithSigV4()
+} else {
+  const response = await invokeWithJwt()
+  stream = response.body!
 }
 
 // ── Read SSE stream ─────────────────────────────────────────────────────
-const reader = response.body!.getReader()
+const reader = stream.getReader()
 const decoder = new TextDecoder()
 let fullText = ''
 
