@@ -33,6 +33,17 @@ export interface StreamCallbacks {
 function createThinkingFilter(callbacks: StreamCallbacks) {
   let inThinking = false
   let tagBuffer = ''
+  let hasEmittedVisible = false
+
+  function emitVisible(text: string) {
+    // Strip leading whitespace before the first visible content
+    if (!hasEmittedVisible) {
+      text = text.replace(/^\s+/, '')
+      if (!text) return
+      hasEmittedVisible = true
+    }
+    callbacks.onToken(text)
+  }
 
   return {
     /** Feed a text delta token. Visible text goes to onToken, thinking to onThinking. */
@@ -48,6 +59,7 @@ function createThinkingFilter(callbacks: StreamCallbacks) {
             if (thinkingText) callbacks.onThinking(thinkingText)
             tagBuffer = tagBuffer.substring(closeIdx + '</thinking>'.length)
             inThinking = false
+            hasEmittedVisible = false // reset so leading whitespace after thinking is stripped
             callbacks.onStatus('Streaming...')
           } else {
             // Could be a partial `</thinking>` at the end — keep buffering
@@ -65,7 +77,7 @@ function createThinkingFilter(callbacks: StreamCallbacks) {
           if (openIdx !== -1) {
             // Emit everything before the open tag as visible text
             const visibleText = tagBuffer.substring(0, openIdx)
-            if (visibleText) callbacks.onToken(visibleText)
+            if (visibleText) emitVisible(visibleText)
             tagBuffer = tagBuffer.substring(openIdx + '<thinking>'.length)
             inThinking = true
             callbacks.onStatus('Thinking...')
@@ -76,12 +88,12 @@ function createThinkingFilter(callbacks: StreamCallbacks) {
             if (lastLt !== -1 && lastLt >= tagBuffer.length - maxPartial) {
               // Potential partial tag at the end
               const safe = tagBuffer.substring(0, lastLt)
-              if (safe) callbacks.onToken(safe)
+              if (safe) emitVisible(safe)
               tagBuffer = tagBuffer.substring(lastLt)
               break
             } else {
               // No partial tag possible — emit everything
-              callbacks.onToken(tagBuffer)
+              emitVisible(tagBuffer)
               tagBuffer = ''
             }
             break
@@ -96,7 +108,7 @@ function createThinkingFilter(callbacks: StreamCallbacks) {
         if (inThinking) {
           callbacks.onThinking(tagBuffer)
         } else {
-          callbacks.onToken(tagBuffer)
+          emitVisible(tagBuffer)
         }
         tagBuffer = ''
       }

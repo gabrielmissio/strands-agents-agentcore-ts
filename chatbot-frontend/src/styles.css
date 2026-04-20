@@ -89,6 +89,8 @@
   border-radius: 1.5rem;
   padding: 0.875rem 1.125rem;
   box-shadow: var(--shadow-stone);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 @utility bubble-caveman-tail {
   position: absolute; left: -14px; bottom: 18px;
@@ -114,6 +116,8 @@
   border-radius: 1.5rem;
   padding: 0.875rem 1.125rem;
   box-shadow: var(--shadow-stone);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 @utility bubble-user-tail {
   position: absolute; right: -14px; bottom: 18px;

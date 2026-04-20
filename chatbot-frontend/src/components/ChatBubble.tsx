@@ -29,7 +29,7 @@ export function ChatBubble({
           <div className="bubble-user">
             <div className="bubble-user-tail" />
             <div className="bubble-user-tail-inner" />
-            <p className="text-sm font-semibold leading-relaxed sm:text-base">
+            <p className="break-words text-sm font-semibold leading-relaxed sm:text-base">
               {message.content}
             </p>
           </div>
@@ -51,7 +51,7 @@ export function ChatBubble({
         <div className="bubble-caveman">
           <div className="bubble-caveman-tail" />
           <div className="bubble-caveman-tail-inner" />
-          <p className="whitespace-pre-wrap text-sm font-semibold leading-relaxed sm:text-base">
+          <p className="whitespace-pre-wrap break-words text-sm font-semibold leading-relaxed sm:text-base">
             {message.content}
             {message.isStreaming && <span className="ml-0.5 inline-block w-1.5 animate-pulse text-fire">▌</span>}
           </p>
