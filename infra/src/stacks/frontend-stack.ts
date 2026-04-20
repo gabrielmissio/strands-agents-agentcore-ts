@@ -39,7 +39,11 @@ export class FrontendStack extends cdk.Stack {
     // ── S3 bucket (private — no public access) ─────────────────────────
     const siteBucket = new s3.Bucket(this, 'SiteBucket', {
       bucketName: `${projectName}-frontend-${this.account}`,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      
+      // NOTE: Current SCP forbids calls to s3:PutBucketPublicAccessBlock.
+      // temporarily comment out and leave default configuration behavior (what also blocks public access, but without an explicit block all public access).
+      // blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+
       encryption: s3.BucketEncryption.S3_MANAGED,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,

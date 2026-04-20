@@ -93,21 +93,15 @@ export class BffStack extends cdk.Stack {
 
     const integration = new apigateway.LambdaIntegration(fn, {
       proxy: true,
+      responseTransferMode: apigateway.ResponseTransferMode.STREAM, // IMPORTANT: Sets stream mode
     })
 
     // ── POST /chat ─────────────────────────────────────────────────────
     const chatResource = api.root.addResource('chat')
-    const chatMethod = chatResource.addMethod('POST', integration, {
+    chatResource.addMethod('POST', integration, {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
     })
-
-    // ── Enable response streaming (equivalent to SAM ResponseTransferMode: RESPONSE_STREAM)
-    // CDK's LambdaIntegration has no L2 property for this — escape hatch required.
-    // This patches the underlying CfnMethod integration to use InvokeWithResponseStream
-    // so API Gateway streams Lambda chunks to the client instead of buffering.
-    const cfnMethod = chatMethod.node.defaultChild as apigateway.CfnMethod
-    cfnMethod.addPropertyOverride('Integration.ResponseStreamingConfig.StreamingState', 'ENABLED')
 
     this.apiUrl = api.url
 
