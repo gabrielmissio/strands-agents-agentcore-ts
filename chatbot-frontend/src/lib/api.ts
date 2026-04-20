@@ -42,9 +42,18 @@ export async function sendMessageBff(
   sessionId: string,
   callbacks: BffStreamCallbacks,
 ): Promise<void> {
+  const session = await fetchAuthSession({ forceRefresh: false })
+  const idToken = session.tokens?.idToken?.toString()
+  if (!idToken) {
+    throw new Error('No valid ID token. Please sign in.')
+  }
+
   const response = await fetch(`${BFF_URL}/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: idToken,
+    },
     body: JSON.stringify({ message, sessionId }),
   })
 

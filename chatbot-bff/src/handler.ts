@@ -17,7 +17,7 @@ function sseHeaders(origin?: string) {
     Connection: 'keep-alive',
     'Access-Control-Allow-Origin': resolveOrigin(origin),
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'X-Content-Type-Options': 'nosniff',
   }
 }
@@ -27,7 +27,7 @@ function jsonHeaders(origin?: string) {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': resolveOrigin(origin),
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   }
 }
 
