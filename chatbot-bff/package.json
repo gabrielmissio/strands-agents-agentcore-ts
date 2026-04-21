@@ -1,0 +1,22 @@
+{
+  "name": "chatbot-bff",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "dev": "dotenvx run -f .env -- tsx src/local.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agentcore": "latest"
+  },
+  "devDependencies": {
+    "@dotenvx/dotenvx": "^1.61.0",
+    "@types/aws-lambda": "^8.10.149",
+    "@types/node": "^25.6.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

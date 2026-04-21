@@ -1,4 +1,6 @@
 .env
 dist/
 temp/
+cdk.out/
+.aws-sam/
 node_modules/

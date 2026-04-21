@@ -1,223 +1,169 @@
 # poc-strands-agents-ts
 
-## Test locally
+Reference implementation for building and deploying Strands Agents in TypeScript on Amazon Bedrock AgentCore Runtime, with two application integration patterns:
 
-### Install dependencies and setup env vars
+- Frontend calls AgentCore directly
+- Frontend calls a Backend-for-Frontend (BFF), which then invokes AgentCore
+
+This repository is intentionally structured as a demo and architectural reference. It shows the agent runtime, a React chatbot, a Lambda-based BFF, and AWS CDK infrastructure in one place so teams can evaluate different integration models before hardening a production implementation.
+
+## What this repository demonstrates
+
+- A Strands-based agent packaged as a container and deployed to Amazon Bedrock AgentCore Runtime
+- A React chatbot UI that can switch between direct AgentCore invocation and BFF-mediated invocation
+- Cognito-based authentication for browser access
+- AWS CDK stacks for the agent runtime, authentication, BFF, and static frontend hosting
+- Local development entry points for the agent and BFF
+
+## Architecture
+
+### Option 1: Frontend calls AgentCore directly
+
+Placeholder: add architecture diagram showing browser -> Cognito -> AgentCore Runtime.
+
+Current behavior:
+
+- The frontend authenticates users with Cognito
+- The browser sends the prompt directly to AgentCore using a bearer token
+- Streaming responses are parsed in the frontend
+
+### Option 2: Frontend calls BFF, which calls AgentCore
+
+Placeholder: add architecture diagram showing browser -> Cognito -> API Gateway/Lambda BFF -> AgentCore Runtime.
+
+Current behavior:
+
+- The frontend still authenticates users with Cognito
+- The browser sends the prompt to the BFF
+- The BFF invokes AgentCore with SigV4 using its Lambda execution role
+- The BFF re-streams events back to the frontend over SSE
+
+## Repository layout
+
+- `agent/`: Strands agent runtime, MCP integrations, local invoke helper, container build context
+- `chatbot-frontend/`: React + Vite chatbot UI with a feature flag for `direct` or `bff` mode
+- `chatbot-bff/`: Lambda-friendly BFF that proxies chat requests to AgentCore
+- `infra/`: AWS CDK application for Cognito, AgentCore Runtime, BFF, and frontend hosting
+
+Package documentation:
+
+- [agent/README.md](agent/README.md)
+- [chatbot-bff/README.md](chatbot-bff/README.md)
+- [chatbot-frontend/README.md](chatbot-frontend/README.md)
+- [infra/README.md](infra/README.md)
+
+## Prerequisites
+
+- Node.js 22+
+- npm 10+
+- Docker with Buildx enabled
+- AWS credentials configured for the target account
+- Access to Amazon Bedrock AgentCore Runtime and the model configured by `BEDROCK_MODEL_ID`
+
+## Configuration model
+
+Each package is configured independently with its own `.env` file:
+
+- `agent/.env`
+- `chatbot-bff/.env`
+- `chatbot-frontend/.env`
+- `infra/.env`
+
+Example environment files are already included in each package as `.env.example`.
+
+Important switches:
+
+- Frontend mode: `VITE_AGENT_MODE` in [chatbot-frontend/.env.example](chatbot-frontend/.env.example)
+- Deployment mode: `FRONTEND_AGENT_MODE` and `AGENT_AUTH_MODE` in [infra/.env.example](infra/.env.example)
+
+## Local development
+
+This repository is not configured as an npm workspace. Install dependencies per package.
+
+### 1. Install dependencies
 
 ```bash
 npm install
-cp .env.example .env
+npm --prefix agent install
+npm --prefix chatbot-bff install
+npm --prefix chatbot-frontend install
+npm --prefix infra install
 ```
 
-### Start HTTP MCP Server
+### 2. Configure environment files
 
 ```bash
-npm run mcp:http
+cp agent/.env.example agent/.env
+cp chatbot-bff/.env.example chatbot-bff/.env
+cp chatbot-frontend/.env.example chatbot-frontend/.env
+cp infra/.env.example infra/.env
 ```
 
-### Start `Caveman Web3 Agent` locally
+Update the copied files with your AWS account details, Cognito values, runtime ARN, and any tool-specific settings you need.
+
+### 3. Work on a specific package
+
+Use the package-level READMEs for package-specific commands and environment details:
+
+- [agent/README.md](agent/README.md)
+- [chatbot-bff/README.md](chatbot-bff/README.md)
+- [chatbot-frontend/README.md](chatbot-frontend/README.md)
+- [infra/README.md](infra/README.md)
+
+Typical local workflow:
+
+- Run the local MCP server and agent runtime from `agent/`
+- Run the local streaming proxy from `chatbot-bff/` when testing BFF mode
+- Run the React app from `chatbot-frontend/`
+
+## Deployment
+
+The CDK application in `infra/` provisions the authentication, agent runtime, BFF, and static frontend hosting layers.
+
+Use the infrastructure package for synth and deployment commands:
+
+- [infra/README.md](infra/README.md)
+
+Key deployment notes:
+
+- `npm run deploy` builds the frontend and BFF first via the `predeploy` hook
+- The agent image defaults to `linux/arm64`
+- The deployed frontend receives runtime configuration through `config.js`, so stack outputs do not need to be baked into the Vite bundle
+
+## Production-readiness assessment
+
+This repository remains a demo/reference implementation. A concrete gap analysis is available in [assessment.md](assessment.md).
+
+## Troubleshooting
+
+### Docker ARM64 build fails with `exec format error`
+
+If `cdk deploy` fails while publishing the agent asset and the Docker build stops at `RUN npm install` with `/bin/sh: exec format error`, the host Docker engine is not ready to run the `linux/arm64` image build configured for the agent runtime.
+
+Typical failure summary:
+
+```text
+poc-strands-agents-agent: fail: docker build --platform linux/arm64 ...
+#8 [4/5] RUN npm install
+#8 0.140 exec /bin/sh: exec format error
+ERROR: failed to build: process "/bin/sh -c npm install" did not complete successfully
+```
+
+Fix it in a separate terminal:
 
 ```bash
-npm run dev
+cd infra
+npm run docker:setup-arm64
 ```
 
-### Send a request to `caveman`
+Then retry the deploy command.
 
+## Current status
 
-```bash
-curl --location 'http://localhost:8080/invocations' \
-    --header 'Content-Type: application/octet-stream' \
-    --data 'how many time the letter `s` apperns in the sentence: satoshi nakamoto'\''s secret'
-```
+Use this repository as:
 
-or
+- A reference for AgentCore integration patterns
+- A demo for stakeholder conversations and internal enablement
+- A starting point for a hardened internal template
 
-
-```bash
-curl --location 'http://localhost:8080/invocations' \
-    --header 'Content-Type: application/octet-stream' \
-    --data 'generate a address that starts with `0xde` than count how many times the letter `d` appears in the address.'
-```
-
-## Test locally (with Docker)
-
-### Build the image
-
-```bash
-docker build -t poc-strands-agents-ts .
-```
-
-### Run the container
-
-> The agent connects to the HTTP MCP server running on your host machine.
-> On Linux, use `--add-host` to expose the host as `host.docker.internal`.
-
-```bash
-docker run -p 8082:8080 \
-  --add-host=host.docker.internal:host-gateway \
-  -e EXCHANGE_RATE_MCP_URL=http://host.docker.internal:8081/mcp \
-  poc-strands-agents-ts
-```
-
-### Test in another terminal
-
-```bash
-curl http://localhost:8082/ping
-```
-
-## Deploying to Amazon Bedrock AgentCore Runtime
-
-### Create IAM Role
-
-#### Make the script executable
-
-```bash
-chmod +x create-iam-role.sh
-```
-
-#### Run the script
-
-```bash
-./create-iam-role.sh
-```
-
-#### Or specify a different region
-
-```bash
-AWS_REGION=us-east-1 ./create-iam-role.sh
-```
-
-### Deploy to AWS
-
-
-#### Set Environment Variables
-
-```bash
-export ACCOUNTID=$(aws sts get-caller-identity --query Account --output text)
-
-export AWS_REGION=us-east-1
-
-export ROLE_ARN=$(aws iam get-role \
-  --role-name PocStrandsAgentsBedrockAgentCoreRuntimeRole \
-  --query 'Role.Arn' \
-  --output text)
-
-export ECR_REPO=poc-strands-agents-bedrock-agent-core-ts
-
-echo accountId: $ACCOUNTID
-echo aws region: $AWS_REGION
-echo runtime role: $ROLE_ARN
-```
-
-#### Create ECR Repository
-
-```bash
-aws ecr create-repository \
-  --repository-name ${ECR_REPO} \
-  --region ${AWS_REGION}
-```
-
-#### Login to ECR
-
-```bash
-aws ecr get-login-password --region ${AWS_REGION} | \
-  docker login --username AWS --password-stdin \
-  ${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-```
-
-#### Build, Tag, and Push
-
-```bash
-docker build -t ${ECR_REPO} .
-
-docker tag ${ECR_REPO}:latest \
-  ${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest
-
-docker push ${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest
-```
-
-#### I dont have arm64 platform
-
-```bash
-# One-time setup: enable QEMU emulation for cross-platform builds
-docker run --privileged --rm tonistiigi/binfmt --install arm64
-
-# Build targeting arm64
-docker buildx build --platform linux/arm64 -t ${ECR_REPO} --load .
-```
-
-```bash
-docker tag ${ECR_REPO}:latest ${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest
-docker push ${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest
-```
-
-
-#### Create AgentCore Runtime
-
-> Set `EXCHANGE_RATE_MCP_URL` if your HTTP MCP server is publicly accessible (e.g. deployed to a URL).
-> If omitted, the agent will start without the coin price tools.
-
-```bash
-aws bedrock-agentcore-control create-agent-runtime \
-  --agent-runtime-name poc-strands-agents-ts \
-  --agent-runtime-artifact containerConfiguration={containerUri=${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest} \
-  --role-arn ${ROLE_ARN} \
-  --network-configuration networkMode=PUBLIC \
-  --protocol-configuration serverProtocol=HTTP \
-  --region ${AWS_REGION}
-  
-#   --environment-variables EXCHANGE_RATE_MCP_URL=https://<your-mcp-server-url>/mcp \
-```
-
-#### Verify Deployment Status
-
-```bash 
-# update -XXXXXXXXXX with actually value...
-export AGENT_RUNTIME_ID="poc-strands-agents-ts-XXXXXXXXXX"
-```
-
-```bash
-aws bedrock-agentcore-control get-agent-runtime \
-  --agent-runtime-id ${AGENT_RUNTIME_ID} \
-  --region ${AWS_REGION} \
-  --query 'status' \
-  --output text
-```
-
-#### Update AgentCore Runtime (after pushing a new image)
-
-Pushing a new image to ECR does **not** trigger an automatic redeployment.
-You must call `update-agent-runtime` to apply the new image:
-
-```bash
-aws bedrock-agentcore-control update-agent-runtime \
-  --agent-runtime-id ${AGENT_RUNTIME_ID} \
-  --agent-runtime-artifact containerConfiguration={containerUri=${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest} \
-  --role-arn ${ROLE_ARN} \
-  --network-configuration networkMode=PUBLIC \
-  --region ${AWS_REGION}
-```
-
-#### Update environment variables (e.g. change the model)
-
-Use `--environment-variables` on `update-agent-runtime`. Note: this is a **full replacement** — include every variable you want to keep.
-
-```bash
-aws bedrock-agentcore-control update-agent-runtime \
-  --agent-runtime-id ${AGENT_RUNTIME_ID} \
-  --agent-runtime-artifact containerConfiguration={containerUri=${ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:latest} \
-  --role-arn ${ROLE_ARN} \
-  --network-configuration networkMode=PUBLIC \
-  --environment-variables BEDROCK_MODEL_ID=amazon.nova-pro-v1:0 \
-  --region ${AWS_REGION}
-```
-
-Then wait for the status to return to `READY`:
-
-```bash
-aws bedrock-agentcore-control get-agent-runtime \
-  --agent-runtime-id ${AGENT_RUNTIME_ID} \
-  --region ${AWS_REGION} \
-  --query 'status' \
-  --output text
-```
+Do not treat it as production-ready without addressing the items in [assessment.md](assessment.md).

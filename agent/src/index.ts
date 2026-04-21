@@ -19,14 +19,27 @@ app.post('/invocations', express.raw({ type: '*/*' }), async (req: Request, res:
     // Decode binary payload from AWS SDK
     const prompt = new TextDecoder().decode(req.body)
 
-    // Invoke the agent
-    const response = await agent.invoke(prompt)
+    // Stream SSE events from the agent
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
 
-    // Return response
-    return res.json({ response })
+    const stream = agent.stream(prompt)
+
+    for await (const event of stream) {
+      const json = JSON.stringify(event)
+      res.write(`data: ${json}\n\n`)
+    }
+
+    res.write('data: [DONE]\n\n')
+    res.end()
   } catch (err) {
     console.error('Error processing request:', err)
-    return res.status(500).json({ error: 'Internal server error' })
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Internal server error' })
+    }
+    res.end()
   }
 })
 
