@@ -1,20 +1,21 @@
 import { fetchAuthSession } from 'aws-amplify/auth'
 import { parseAgentCoreStream, type StreamCallbacks } from './stream-parser'
+import { readAppConfig } from './app-config'
 
 // ── Mode selection ──────────────────────────────────────────────────────
 // Set VITE_AGENT_MODE=direct  → calls AgentCore directly (needs Cognito)
 // Set VITE_AGENT_MODE=bff     → calls BFF proxy (default, SSE streaming)
 export type AgentMode = 'direct' | 'bff'
 export const AGENT_MODE: AgentMode =
-  (import.meta.env.VITE_AGENT_MODE ?? 'bff') as AgentMode
+  (readAppConfig('VITE_AGENT_MODE') ?? 'bff') as AgentMode
 
 // ── Config ──────────────────────────────────────────────────────────────
-const BFF_URL = import.meta.env.VITE_API_URL ?? '/api'
-const AGENT_RUNTIME_ARN = import.meta.env.VITE_AGENT_RUNTIME_ARN ?? ''
-const AGENT_ENDPOINT_NAME = import.meta.env.VITE_AGENT_ENDPOINT_NAME ?? 'DEFAULT'
-const AWS_REGION = import.meta.env.VITE_AWS_REGION ?? 'us-east-1'
+const BFF_URL = readAppConfig('VITE_API_URL') ?? '/api'
+const AGENT_RUNTIME_ARN = readAppConfig('VITE_AGENT_RUNTIME_ARN') ?? ''
+const AGENT_ENDPOINT_NAME = readAppConfig('VITE_AGENT_ENDPOINT_NAME') ?? 'DEFAULT'
+const AWS_REGION = readAppConfig('VITE_AWS_REGION') ?? 'us-east-1'
 const AGENTCORE_URL =
-  import.meta.env.VITE_AGENTCORE_URL ??
+  readAppConfig('VITE_AGENTCORE_URL') ??
   `https://bedrock-agentcore.${AWS_REGION}.amazonaws.com`
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -143,10 +144,10 @@ export async function sendMessageDirect(
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/octet-stream',
       'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
     },
-    body: JSON.stringify({ prompt: message }),
+    body: message,
   })
 
   if (!response.ok) {

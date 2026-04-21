@@ -97,8 +97,8 @@ const agentStack = new AgentStack(app, `${projectName}-agent`, {
   projectName,
   agentAuthMode,
   imagePlatform: agentImagePlatform,
-  // cognitoDiscoveryUrl: `https://cognito-idp.${env.region ?? 'us-east-1'}.amazonaws.com/${authStack.userPool.userPoolId}/.well-known/openid-configuration`,
-  // cognitoUserPoolClientId: authStack.userPoolClient.userPoolClientId,
+  cognitoDiscoveryUrl: `https://cognito-idp.${env.region ?? 'us-east-1'}.amazonaws.com/${authStack.userPool.userPoolId}/.well-known/openid-configuration`,
+  cognitoUserPoolClientId: authStack.userPoolClient.userPoolClientId,
   runtimeEnvironment: pickDefinedEnvironment([
     'BEDROCK_MODEL_ID',
     'EXCHANGE_RATE_MCP_URL',
