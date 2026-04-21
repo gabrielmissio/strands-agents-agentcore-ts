@@ -91,12 +91,9 @@ const server = createServer(async (req, res) => {
       agentRuntimeArn: AGENT_RUNTIME_ARN,
     })
 
-    const reader = stream.getReader()
     const decoder = new TextDecoder()
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+    for await (const value of stream) {
       const chunk = decoder.decode(value, { stream: true })
       if (chunk) {
         writeSseEvent(res, 'chunk', { content: chunk })

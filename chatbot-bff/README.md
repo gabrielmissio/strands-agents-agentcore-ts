@@ -8,7 +8,7 @@ Thin Backend-for-Frontend (BFF) that proxies chat messages to the Caveman Web3 A
 Frontend (React) → POST /chat → BFF (Lambda) → InvokeAgentRuntimeCommand → AgentCore
 ```
 
-The BFF holds AWS credentials (via Lambda execution role) and:
+The BFF is SigV4-only. It uses the Lambda execution role to call AgentCore and:
 - Invokes the agent via the AWS SDK (`@aws-sdk/client-bedrock-agentcore`)
 - Parses the AgentCore response envelope
 - Extracts `<thinking>` blocks and tool usage into separate fields
@@ -42,6 +42,8 @@ Deploy `dist/handler.js` as an ESM Lambda handler (`handler.handler`).
 | `AGENT_RUNTIME_ARN` | Yes | ARN of the Bedrock AgentCore Runtime |
 | `AWS_REGION` | No | Defaults to `us-east-1` |
 | `ALLOWED_ORIGIN` | No | CORS origin. Defaults to `*` |
+
+There is no JWT invocation mode in the BFF. Browser JWT auth is handled by the frontend direct mode; the BFF always invokes AgentCore with SigV4.
 
 ## Lambda + API Gateway caveats
 

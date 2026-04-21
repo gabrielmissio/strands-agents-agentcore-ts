@@ -87,10 +87,13 @@ export class AuthStack extends cdk.Stack {
         },
         'sts:AssumeRoleWithWebIdentity',
       ),
-      description: 'Role for authenticated Cognito users - allows AgentCore invocation',
+      description: 'Role for authenticated Cognito users',
     })
 
-    // Allow invoking any AgentCore runtime (restrict to specific ARN in prod)
+    // TODO: Revisit whether this policy should stay once the direct-mode auth
+    // contract is finalized. The current frontend direct flow uses JWT bearer
+    // tokens, but keeping invoke permission here preserves the option to switch
+    // direct mode to Cognito-issued AWS credentials without another infra change.
     authenticatedRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,

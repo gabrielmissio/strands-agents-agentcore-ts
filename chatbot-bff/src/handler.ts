@@ -110,13 +110,9 @@ export const handler = awslambda.streamifyResponse(
         agentRuntimeArn: AGENT_RUNTIME_ARN,
       })
 
-      const reader = stream.getReader()
       const decoder = new TextDecoder()
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
+      for await (const value of stream) {
         const chunk = decoder.decode(value, { stream: true })
         if (chunk) {
           writeSseEvent(responseStream, 'chunk', { content: chunk })

@@ -9,8 +9,7 @@
     "dev": "dotenvx run -f .env -- tsx src/local.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-agentcore": "latest",
-    "amazon-cognito-identity-js": "^6.3.16"
+    "@aws-sdk/client-bedrock-agentcore": "latest"
   },
   "devDependencies": {
     "@dotenvx/dotenvx": "^1.61.0",

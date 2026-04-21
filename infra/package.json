@@ -5,15 +5,23 @@
   "type": "module",
   "scripts": {
     "cdk": "cdk",
-    "synth": "cdk synth",
-    "deploy": "cdk deploy --all --require-approval never",
-    "destroy": "cdk destroy --all"
+    "docker:setup-arm64": "docker run --privileged --rm tonistiigi/binfmt --install arm64",
+    "build:dependencies": "npm --prefix ../chatbot-bff run build && npm --prefix ../chatbot-frontend run build",
+    "presynth": "npm run build:dependencies",
+    "synth": "dotenvx run -f .env -- cdk synth",
+    "predeploy": "npm run build:dependencies",
+    "deploy": "dotenvx run -f .env -- cdk deploy --all --require-approval never",
+    "destroy": "dotenvx run -f .env -- cdk destroy --all",
+    "deploy:agent": "dotenvx run -f .env -- cdk deploy poc-strands-agents-agent --require-approval never",
+    "predeploy:bff": "npm --prefix ../chatbot-bff run build",
+    "deploy:bff": "dotenvx run -f .env -- cdk deploy poc-strands-agents-bff --require-approval never"
   },
   "dependencies": {
     "aws-cdk-lib": "^2.250.0",
     "constructs": "^10.6.0"
   },
   "devDependencies": {
+    "@dotenvx/dotenvx": "^1.61.1",
     "@types/node": "^25.6.0",
     "aws-cdk": "^2.1118.3",
     "tsx": "^4.21.0",
