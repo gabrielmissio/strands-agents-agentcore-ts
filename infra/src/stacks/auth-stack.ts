@@ -14,6 +14,12 @@ export interface AuthStackProps extends cdk.StackProps {
    * temporary password Cognito emails them and is prompted to choose a new one.
    */
   publicSignUpEnabled?: boolean
+  /**
+   * Whether the user pool survives a stack deletion. Defaults to retaining it, because losing every
+   * account is not recoverable and an orphaned pool is. Set `false` (via `RETAIN_DATA=false`) for a
+   * disposable environment.
+   */
+  retainData?: boolean
 }
 
 /**
@@ -52,7 +58,7 @@ export class AuthStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props)
 
-    const { projectName, publicSignUpEnabled = true } = props
+    const { projectName, publicSignUpEnabled = true, retainData = true } = props
 
     // ── User Pool ──────────────────────────────────────────────────────
     this.userPool = new cognito.UserPool(this, 'UserPool', {
@@ -87,7 +93,9 @@ export class AuthStack extends cdk.Stack {
         requireSymbols: false,
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      // The pool holds every account in the environment. `cdk destroy`, or a property change that
+      // forces replacement, would take them all with it.
+      removalPolicy: retainData ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     })
 
     // ── Groups (roles) ─────────────────────────────────────────────────

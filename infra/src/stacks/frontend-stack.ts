@@ -21,6 +21,12 @@ export interface FrontendStackProps extends cdk.StackProps {
   agentRuntimeArn: string
   /** Mirrors AuthStackProps.publicSignUpEnabled — tells the SPA which auth screen to render. */
   publicSignUpEnabled: boolean
+  /**
+   * Mirrors AuthStackProps.retainData. The bucket only holds a rebuildable static build, so this is
+   * mostly about not orphaning it on every disposable-environment teardown — unlike the user pool,
+   * losing it costs nothing but a redeploy.
+   */
+  retainData?: boolean
 }
 
 export class FrontendStack extends cdk.Stack {
@@ -39,19 +45,22 @@ export class FrontendStack extends cdk.Stack {
       cognitoRegion,
       agentRuntimeArn,
       publicSignUpEnabled,
+      retainData = true,
     } = props
 
     // ── S3 bucket (private — no public access) ─────────────────────────
     const siteBucket = new s3.Bucket(this, 'SiteBucket', {
       bucketName: `${projectName}-frontend-${this.account}`,
-      
+
       // NOTE: Current SCP forbids calls to s3:PutBucketPublicAccessBlock.
       // temporarily comment out and leave default configuration behavior (what also blocks public access, but without an explicit block all public access).
       // blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
 
       encryption: s3.BucketEncryption.S3_MANAGED,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: true,
+      removalPolicy: retainData ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      // Only safe alongside DESTROY: emptying a bucket you are about to retain would just leave an
+      // empty one behind, defeating the point.
+      autoDeleteObjects: !retainData,
     })
 
     // ── CloudFront Origin Access Control ──────────────────────────────

@@ -4,13 +4,30 @@ import * as iam from 'aws-cdk-lib/aws-iam'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as logs from 'aws-cdk-lib/aws-logs'
 import * as apigateway from 'aws-cdk-lib/aws-apigateway'
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch'
+import * as cwactions from 'aws-cdk-lib/aws-cloudwatch-actions'
+import * as budgets from 'aws-cdk-lib/aws-budgets'
+import * as sns from 'aws-cdk-lib/aws-sns'
+import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions'
 import { Construct } from 'constructs'
 import { ADMIN_GROUP_NAME } from './auth-stack.js'
+
+/** Requests/second allowed on the API stage, and the burst above it. */
+export interface ApiThrottle {
+  rateLimit: number
+  burstLimit: number
+}
 
 export interface BffStackProps extends cdk.StackProps {
   projectName: string
   userPool: cognito.UserPool
   agentRuntimeArn: string
+  /** Caps requests/second on the API stage. Every request that gets through costs Bedrock tokens. */
+  throttle: ApiThrottle
+  /** Subscribed to alarms and to the budget. The alarms exist either way. */
+  alertEmail?: string
+  /** Monthly USD ceiling that triggers a budget notification. Omitted disables the budget. */
+  monthlyBudgetUsd?: number
 }
 
 export class BffStack extends cdk.Stack {
@@ -20,7 +37,7 @@ export class BffStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: BffStackProps) {
     super(scope, id, props)
 
-    const { projectName, userPool, agentRuntimeArn } = props
+    const { projectName, userPool, agentRuntimeArn, throttle, alertEmail, monthlyBudgetUsd } = props
 
     // ── Lambda function ────────────────────────────────────────────────
     const fn = new lambda.Function(this, 'ChatFunction', {
@@ -41,7 +58,8 @@ export class BffStack extends cdk.Stack {
       },
       logGroup: new logs.LogGroup(this, 'ChatFunctionLogs', {
         logGroupName: `/aws/lambda/${projectName}-bff`,
-        retention: logs.RetentionDays.ONE_WEEK,
+        // A week does not survive an incident found after a weekend.
+        retention: logs.RetentionDays.ONE_MONTH,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
     })
@@ -56,11 +74,39 @@ export class BffStack extends cdk.Stack {
     )
 
     // ── API Gateway REST API ───────────────────────────────────────────
+    // Access logs answer "who called what, when" at the edge — the admin function's own audit
+    // lines (see chatbot-bff/src/admin.ts) cover intent, these cover reach. `dataTraceEnabled` stays
+    // off on purpose: it would write request and response bodies into CloudWatch, which is how a
+    // conversation leaks into the logs.
+    const accessLogGroup = new logs.LogGroup(this, 'ApiAccessLogs', {
+      logGroupName: `/aws/apigateway/${projectName}-chat-api`,
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    })
+
     const api = new apigateway.RestApi(this, 'ChatApi', {
       restApiName: `${projectName}-chat-api`,
       deployOptions: {
         stageName: 'prod',
         loggingLevel: apigateway.MethodLoggingLevel.ERROR,
+        // Without this the stage inherits the account default (10k rps), which is not a limit so
+        // much as an invitation — every request that gets through costs Bedrock tokens.
+        throttlingRateLimit: throttle.rateLimit,
+        throttlingBurstLimit: throttle.burstLimit,
+        accessLogDestination: new apigateway.LogGroupLogDestination(accessLogGroup),
+        // Identity and outcome, no payload.
+        accessLogFormat: apigateway.AccessLogFormat.custom(
+          JSON.stringify({
+            requestId: apigateway.AccessLogField.contextRequestId(),
+            at: apigateway.AccessLogField.contextRequestTime(),
+            method: apigateway.AccessLogField.contextHttpMethod(),
+            path: apigateway.AccessLogField.contextResourcePath(),
+            status: apigateway.AccessLogField.contextStatus(),
+            latencyMs: apigateway.AccessLogField.contextResponseLatency(),
+            sourceIp: apigateway.AccessLogField.contextIdentitySourceIp(),
+            actorSub: apigateway.AccessLogField.contextAuthorizerClaims('sub'),
+          }),
+        ),
       },
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
@@ -118,7 +164,7 @@ export class BffStack extends cdk.Stack {
       },
       logGroup: new logs.LogGroup(this, 'AdminFunctionLogs', {
         logGroupName: `/aws/lambda/${projectName}-bff-admin`,
-        retention: logs.RetentionDays.ONE_WEEK,
+        retention: logs.RetentionDays.ONE_MONTH,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
     })
@@ -149,6 +195,70 @@ export class BffStack extends cdk.Stack {
       adminUsers.addMethod(method, adminIntegration, {
         authorizer,
         authorizationType: apigateway.AuthorizationType.COGNITO,
+      })
+    }
+
+    // ── Operations: alarms and a spend ceiling ──────────────────────────
+    // Without these you find out the deployment is broken, or expensive, from a user or an invoice.
+    const alarmTopic = new sns.Topic(this, 'AlarmTopic', {
+      topicName: `${projectName}-alarms`,
+      displayName: `${projectName} alarms`,
+    })
+
+    if (alertEmail) {
+      alarmTopic.addSubscription(new subscriptions.EmailSubscription(alertEmail))
+    }
+
+    const alarms: cloudwatch.Alarm[] = [
+      new cloudwatch.Alarm(this, 'ChatFunctionErrors', {
+        alarmName: `${projectName}-chat-errors`,
+        alarmDescription: 'The chat Lambda is failing — users see a broken conversation.',
+        metric: fn.metricErrors({ period: cdk.Duration.minutes(5) }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+      new cloudwatch.Alarm(this, 'AdminFunctionErrors', {
+        alarmName: `${projectName}-admin-errors`,
+        alarmDescription: 'The admin Lambda is failing — invites and the user list are broken.',
+        metric: adminFn.metricErrors({ period: cdk.Duration.minutes(5) }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+      new cloudwatch.Alarm(this, 'ApiServerErrors', {
+        alarmName: `${projectName}-api-5xx`,
+        alarmDescription: 'The API is returning 5XX — the failure is at or before the integration.',
+        metric: api.metricServerError({ period: cdk.Duration.minutes(5) }),
+        threshold: 1,
+        evaluationPeriods: 1,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }),
+    ]
+
+    for (const alarm of alarms) {
+      alarm.addAlarmAction(new cwactions.SnsAction(alarmTopic))
+    }
+
+    // A budget alerts; it cannot stop spend. It exists so a runaway loop is noticed in hours rather
+    // than on the invoice. Account-wide by nature, so it needs an address to notify.
+    if (monthlyBudgetUsd && alertEmail) {
+      new budgets.CfnBudget(this, 'MonthlyBudget', {
+        budget: {
+          budgetName: `${projectName}-monthly`,
+          budgetType: 'COST',
+          timeUnit: 'MONTHLY',
+          budgetLimit: { amount: monthlyBudgetUsd, unit: 'USD' },
+        },
+        notificationsWithSubscribers: [80, 100].map((threshold) => ({
+          notification: {
+            notificationType: 'ACTUAL',
+            comparisonOperator: 'GREATER_THAN',
+            threshold,
+            thresholdType: 'PERCENTAGE',
+          },
+          subscribers: [{ subscriptionType: 'EMAIL', address: alertEmail }],
+        })),
       })
     }
 

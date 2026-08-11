@@ -42,6 +42,10 @@ Use [infra/.env.example](.env.example) as the source of truth.
 | `AGENT_IMAGE_PLATFORM` | No | Docker platform for the agent image build |
 | `AGENT_AUTH_MODE` | No | Agent runtime auth mode. Also derives the deployed frontend transport mode: `JWT` -> `direct`, `SIGV4` -> `bff` |
 | `PUBLIC_SIGNUP_ENABLED` | No | `true` (default): visitors can self sign-up. `false`: invite-only — see below |
+| `RETAIN_DATA` | No | `true` (default): the user pool and frontend bucket survive `cdk destroy`. `false`: disposable environment — see below |
+| `ALERT_EMAIL` | No | Subscribed to the CloudWatch alarms and the budget notification |
+| `MONTHLY_BUDGET_USD` | No | Monthly spend ceiling that triggers a budget notification at 80%/100%. Requires `ALERT_EMAIL` |
+| `API_RATE_LIMIT` / `API_BURST_LIMIT` | No | Requests/second (and burst above it) allowed on the API stage. Default `10` / `20` |
 
 Additional runtime environment variables for the agent can also be passed through this package, including model and tool configuration.
 
@@ -81,6 +85,17 @@ aws cognito-idp list-users-in-group \
 ```
 
 Group changes only reach the browser on the next token issuance — the user has to sign out and back in, or wait for the refresh token to mint a new access token. The admin badge in the UI is cosmetic; the BFF's admin routes re-check group membership server-side on every call (see `chatbot-bff/src/admin.ts`), so a stale client-side claim can under-grant but never over-grant access.
+
+## Guardrails
+
+Four small settings, all opt-in, whose failure mode is silent until it is expensive or irreversible:
+
+- **`RETAIN_DATA`** (default `true`) — controls the `RemovalPolicy` on the user pool and the frontend bucket. Retaining in a throwaway environment leaves a resource to delete by hand; destroying in a real one deletes every account irreversibly. The asymmetry is why the default is retain, not destroy.
+- **`ALERT_EMAIL`** — subscribes an address to an SNS topic that three CloudWatch alarms publish to: chat Lambda errors, admin Lambda errors, and API Gateway 5XX. The alarms exist regardless of whether this is set; without it, nobody is notified when they fire.
+- **`MONTHLY_BUDGET_USD`** (needs `ALERT_EMAIL`) — an AWS Budget that notifies at 80% and 100% of the ceiling. A budget alerts; it cannot stop spend. It exists so a runaway loop is noticed in hours rather than on the invoice.
+- **`API_RATE_LIMIT`** / **`API_BURST_LIMIT`** (default `10` / `20`) — throttling on the API Gateway stage. Left unset, the stage inherits the account default of 10,000 requests/second, which is not a limit so much as an invitation — every request that gets through costs Bedrock tokens.
+
+API Gateway access logs (identity and outcome — method, path, status, latency, caller `sub` — never the request body) are always on, in `/aws/apigateway/<project>-chat-api`, independent of `ALERT_EMAIL`.
 
 ## Notes
 
