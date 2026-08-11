@@ -17,6 +17,14 @@ export interface AuthStackProps extends cdk.StackProps {
 }
 
 /**
+ * Cognito group whose members the frontend and BFF treat as operators. Kept in one place because
+ * both sides have to match it exactly: the frontend reads it out of the `cognito:groups` claim to
+ * show an Admin badge, and the BFF's admin routes read the same claim to decide whether to allow the
+ * call — see `chatbot-bff/src/admin.ts`.
+ */
+export const ADMIN_GROUP_NAME = 'admins'
+
+/**
  * Creates a Cognito User Pool + Identity Pool for frontend-to-AgentCore auth.
  *
  * Flow (public sign-up):
@@ -80,6 +88,17 @@ export class AuthStack extends cdk.Stack {
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
+    })
+
+    // ── Groups (roles) ─────────────────────────────────────────────────
+    // Cognito emits group membership as the `cognito:groups` claim in *both* the id token and the
+    // access token, with no Lambda in the request path — unlike a pre-token-generation trigger,
+    // which would bill and add latency on every token issuance just to answer "is this an operator".
+    new cognito.CfnUserPoolGroup(this, 'AdminsGroup', {
+      userPoolId: this.userPool.userPoolId,
+      groupName: ADMIN_GROUP_NAME,
+      description: 'Operators. Membership is granted via the admin panel or `admin-add-user-to-group`.',
+      precedence: 0,
     })
 
     // ── User Pool Client (for frontend SPA) ────────────────────────────
@@ -156,6 +175,11 @@ export class AuthStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'IdentityPoolId', {
       value: this.identityPool.ref,
       exportName: `${projectName}-IdentityPoolId`,
+    })
+
+    new cdk.CfnOutput(this, 'AdminGroupName', {
+      value: ADMIN_GROUP_NAME,
+      exportName: `${projectName}-AdminGroupName`,
     })
 
     new cdk.CfnOutput(this, 'CognitoRegion', {

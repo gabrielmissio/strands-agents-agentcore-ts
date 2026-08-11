@@ -38,6 +38,12 @@ The current implementation requires Cognito sign-in before the chat UI is availa
 - `true` (default): sign in, or sign up and confirm via email code.
 - `false`: sign in only — no sign-up form. An admin provisions the account (see [infra/README.md](../infra/README.md#user-provisioning-invite-only)), and the first sign-in answers Cognito's `NEW_PASSWORD_REQUIRED` challenge to replace the temporary password.
 
+## Admin panel
+
+Members of the Cognito `admins` group (see [infra/README.md](../infra/README.md#admin-group)) get an **Admin** badge in the chat header that opens [`AdminPanel`](src/components/AdminPanel.tsx) — list existing users and invite new ones without leaving the browser. There is no router here: `App.tsx` just swaps which component it renders.
+
+The badge and the panel are reachability only. [`src/lib/session-roles.ts`](src/lib/session-roles.ts) reads the `cognito:groups` claim decoded in the browser, which proves nothing to a server — the BFF's `/admin/users` routes re-check group membership on every call (see `chatbot-bff/src/admin.ts`), so a stale or forged client-side claim can under-grant access but never over-grant it.
+
 ## Environment variables
 
 Use [chatbot-frontend/.env.example](.env.example) as the source of truth.

@@ -9,7 +9,8 @@
     "dev": "dotenvx run -f .env --overload -- tsx src/local.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-bedrock-agentcore": "latest"
+    "@aws-sdk/client-bedrock-agentcore": "latest",
+    "@aws-sdk/client-cognito-identity-provider": "latest"
   },
   "devDependencies": {
     "@dotenvx/dotenvx": "^1.61.0",

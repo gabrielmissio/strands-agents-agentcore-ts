@@ -1,35 +1,11 @@
 import type { APIGatewayProxyEvent } from 'aws-lambda'
 import type { Writable } from 'node:stream'
 import { invokeAgentStream } from './agent-client.js'
+import { jsonHeaders, sseHeaders } from './http.js'
 import { resolveSessionId } from './session.js'
 
 const AGENT_RUNTIME_ARN = process.env.AGENT_RUNTIME_ARN ?? ''
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? '*'
-
-function resolveOrigin(origin?: string) {
-  return ALLOWED_ORIGIN === '*' ? '*' : (origin ?? ALLOWED_ORIGIN)
-}
-
-function sseHeaders(origin?: string) {
-  return {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-cache, no-transform',
-    Connection: 'keep-alive',
-    'Access-Control-Allow-Origin': resolveOrigin(origin),
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'X-Content-Type-Options': 'nosniff',
-  }
-}
-
-function jsonHeaders(origin?: string) {
-  return {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': resolveOrigin(origin),
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  }
-}
 
 function writeSseEvent(
   responseStream: Writable,
@@ -59,7 +35,7 @@ export const handler = awslambda.streamifyResponse(
 
     const httpResponseMetadata = {
       statusCode: 200,
-      headers: sseHeaders(origin),
+      headers: sseHeaders(ALLOWED_ORIGIN, origin),
     }
 
     // This is the AWS-recommended wrapper for HTTP metadata with response streaming.
@@ -77,7 +53,7 @@ export const handler = awslambda.streamifyResponse(
       responseStream.destroy(
         new Error(JSON.stringify({
           statusCode: 405,
-          headers: jsonHeaders(origin),
+          headers: jsonHeaders(ALLOWED_ORIGIN, origin),
           body: JSON.stringify({ error: 'Method not allowed' }),
         })),
       )

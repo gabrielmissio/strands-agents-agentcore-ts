@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { LogOut, Send, Sparkles } from 'lucide-react'
+import { LogOut, Send, ShieldCheck, Sparkles } from 'lucide-react'
 import cavemanMascot from '@/assets/caveman-mascot.png'
 import { ChatBubble, type ChatMessage } from './ChatBubble.tsx'
 import { ThinkingBubble } from './ThinkingBubble.tsx'
@@ -15,11 +15,19 @@ const SUGGESTIONS = [
 export interface ChatExperienceProps {
   /** Shown in the header so it is obvious which account is talking to the agent. */
   userEmail?: string
+  /**
+   * Renders the admin badge and the link to the admin panel. Cosmetic — it reflects a
+   * `cognito:groups` claim read in the browser, so it must never be the thing that gates a
+   * privileged action; the BFF's admin routes re-check group membership server-side.
+   */
+  isAdmin?: boolean
   /** Owned by the caller — clears the Cognito session and swaps back to the auth screen. */
   onSignOut?: () => void | Promise<void>
+  /** Shown only alongside `isAdmin` — switches the app to the admin panel view. */
+  onOpenAdmin?: () => void
 }
 
-export function ChatExperience({ userEmail, onSignOut }: ChatExperienceProps) {
+export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: ChatExperienceProps) {
   const [signingOut, setSigningOut] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -253,6 +261,17 @@ export function ChatExperience({ userEmail, onSignOut }: ChatExperienceProps) {
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            {isAdmin && onOpenAdmin && (
+              <button
+                type="button"
+                onClick={onOpenAdmin}
+                title="Admin panel"
+                className="flex items-center gap-1 rounded-xl border-[3px] border-cave bg-fire px-2 py-1 font-display text-[10px] uppercase tracking-wider text-fire-foreground shadow-[var(--shadow-stone)] transition active:translate-y-0.5 active:shadow-none"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Admin
+              </button>
+            )}
             {userEmail && (
               <span
                 className="hidden max-w-[14rem] truncate text-xs font-semibold text-muted-foreground sm:block"
