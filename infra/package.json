@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "cdk": "cdk",
+    "typecheck": "tsc --noEmit",
     "docker:setup-arm64": "docker run --privileged --rm tonistiigi/binfmt --install arm64",
     "build:dependencies": "npm --prefix ../chatbot-bff run build && npm --prefix ../chatbot-frontend run build",
     "presynth": "npm run build:dependencies",

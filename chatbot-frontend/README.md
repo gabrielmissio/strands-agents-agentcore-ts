@@ -19,6 +19,7 @@ npm run dev
 | `npm run dev` | Start the local Vite development server |
 | `npm run build` | Type-check and build the production bundle |
 | `npm run preview` | Preview the built bundle locally |
+| `npm run typecheck` | Run `tsc --noEmit` on its own, without building |
 
 ## Runtime modes
 

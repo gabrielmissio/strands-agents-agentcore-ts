@@ -20,6 +20,7 @@ cp .env.example .env
 | `npm run deploy:agent` | Deploy only the agent stack |
 | `npm run deploy:bff` | Build the BFF and deploy only the BFF stack |
 | `npm run destroy` | Destroy all stacks |
+| `npm run typecheck` | Run `tsc --noEmit` |
 | `npm run docker:setup-arm64` | Enable local ARM64 emulation for Docker |
 
 ## Stacks

@@ -136,12 +136,17 @@ The root package provides a small set of convenience commands for common workflo
 
 | Script                       | Purpose                                                              |
 | ---------------------------- | -------------------------------------------------------------------- |
-| `npm run bootstrap`          | Install locked dependencies for the root package and each subpackage |
+| `npm run bootstrap`          | Install locked dependencies for the root package and each subpackage (`npm ci`) |
+| `npm run install:all`        | Same, but with `npm install` — use when a lockfile needs updating, e.g. after adding a dependency |
+| `npm run install:all:fix`    | `install:all`, then `npm audit fix` in the root package and each subpackage (semver-compatible fixes only — no `--force`). Each `audit fix` runs regardless of whether an earlier one still has unresolved findings, so one package short of a full fix never blocks the rest |
 | `npm run lint`               | Run repository-wide ESLint checks                                    |
+| `npm run typecheck`          | Run `tsc --noEmit` in every subpackage                                |
 | `npm run synth`              | Build deployable artifacts and synthesize the CDK app                |
 | `npm run deploy`             | Deploy all infrastructure                                            |
 | `npm run destroy`            | Destroy all deployed stacks                                          |
 | `npm run docker:setup-arm64` | Enable local ARM64 Docker emulation for agent image builds           |
+
+`npm run install:all:fix` only makes semver-compatible changes, but in `infra/` that still isn't risk-free: `npm audit fix` can bump `aws-cdk-lib` within its declared range (`^2.250.0`) to a version whose cloud-assembly schema is newer than the pinned `aws-cdk` CLI (`aws-cdk-lib`'s own devDependency, `^2.1118.3`) can read — `cdk synth` then fails with a schema-version mismatch, even though nothing in `infra/package.json` changed. Run `npm run synth` after using this script and, if it fails that way, either bump `aws-cdk` to the version the error message names or revert `infra/package-lock.json`.
 
 ## Deployment notes
 
