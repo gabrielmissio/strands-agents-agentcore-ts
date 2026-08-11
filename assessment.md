@@ -6,6 +6,8 @@ This repository is a strong demo/reference implementation for Strands Agents + T
 
 The main gap is not core functionality. The agent, frontend, BFF, and CDK stacks demonstrate the intended architecture well. The gap is production hardening across security, delivery, operability, testing, and documentation consistency.
 
+A hardening pass since this assessment was first written closed several of the gaps below: a real over-broad IAM grant, a year-long CloudFront cache bug, a cross-user agent-conversation leak, an unbound BFF session id, destructive infra defaults, and undocumented/placeholder module READMEs. It also added an invite-only auth mode and an admin panel for user management. The sections below are marked accordingly — CI/CD, automated tests, permissive CORS, and secret handling remain open.
+
 ## Overall verdict
 
 - Architecture clarity: good for a demo/reference repository
@@ -17,24 +19,23 @@ The main gap is not core functionality. The agent, frontend, BFF, and CDK stacks
 
 ### 1. Documentation and behavior are not fully aligned
 
-Impact: high
+Impact: high → largely addressed
 
 Why it matters:
 
 - The repository is explicitly intended as a reference implementation
 - In a reference repo, inaccurate documentation creates architectural confusion faster than code defects
 
-Evidence:
+Evidence (current):
 
-- The frontend always requires Cognito sign-in before showing the chat experience in [chatbot-frontend/src/App.tsx](chatbot-frontend/src/App.tsx#L5)
-- BFF requests still attach an ID token in [chatbot-frontend/src/lib/api.ts](chatbot-frontend/src/lib/api.ts#L38)
-- The API Gateway BFF endpoint is protected with a Cognito authorizer in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts#L73)
-- The existing BFF README states that BFF mode is the default and requires no auth, which is no longer true in the current implementation
+- The frontend always requires Cognito sign-in before showing the chat experience in [chatbot-frontend/src/App.tsx](chatbot-frontend/src/App.tsx)
+- BFF requests still attach an ID token in [chatbot-frontend/src/lib/api.ts](chatbot-frontend/src/lib/api.ts)
+- The API Gateway BFF endpoint is protected with a Cognito authorizer in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts)
+- `chatbot-bff/README.md`, `chatbot-frontend/README.md`, and `infra/README.md` now document the auth flow (including the invite-only mode and the admin panel), the two integration modes, and the guardrail env vars explicitly — see gap #11, now resolved
 
-Recommendation:
+Remaining:
 
-- Keep all docs explicit that both current modes depend on Cognito for browser access
-- Document the exact difference between direct mode and BFF mode: who authenticates, who invokes AgentCore, and where streaming is terminated and re-emitted
+- No repository-wide doc that puts direct mode and BFF mode side by side (who authenticates, who invokes AgentCore, where streaming terminates and is re-emitted) — each package README covers its own side of that boundary, but there is no single comparison table
 
 ### 2. No CI/CD or automated quality gates
 
@@ -86,10 +87,10 @@ Why it matters:
 
 Evidence:
 
-- `ALLOWED_ORIGIN` defaults to `*` in the BFF examples and handler behavior, including [chatbot-bff/.env.example](chatbot-bff/.env.example) and [chatbot-bff/src/handler.ts](chatbot-bff/src/handler.ts#L7)
-- API Gateway CORS is configured with all origins in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts#L49)
-- The frontend S3 bucket intentionally leaves the explicit public-access-block setting commented out because of an SCP issue in [infra/src/stacks/frontend-stack.ts](infra/src/stacks/frontend-stack.ts#L33)
-- A private key is still described as an environment variable in [agent/.env.example](agent/.env.example#L13)
+- `ALLOWED_ORIGIN` defaults to `*` in the BFF examples and handler behavior, including [chatbot-bff/.env.example](chatbot-bff/.env.example) and [chatbot-bff/src/handler.ts](chatbot-bff/src/handler.ts) — this now applies to both the chat function and the new admin function
+- API Gateway CORS is configured with all origins in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts) (now covering `/chat` and `/admin/users` alike)
+- The frontend S3 bucket intentionally leaves the explicit public-access-block setting commented out because of an SCP issue in [infra/src/stacks/frontend-stack.ts](infra/src/stacks/frontend-stack.ts)
+- A private key is still described as an environment variable in [agent/.env.example](agent/.env.example)
 
 Recommendation:
 
@@ -100,7 +101,7 @@ Recommendation:
 
 ### 5. Configuration validation is weak
 
-Impact: high
+Impact: high → partially addressed in `infra/`
 
 Why it matters:
 
@@ -109,32 +110,34 @@ Why it matters:
 
 Evidence:
 
-- The frontend auth config logs a warning and continues when Cognito values are missing in [chatbot-frontend/src/lib/auth.ts](chatbot-frontend/src/lib/auth.ts#L13)
-- Runtime configuration is distributed across multiple `.env` files with no root orchestration or schema validation
-- Several packages depend directly on `process.env` without a shared validation layer
+- `infra/src/app.ts` now validates every guardrail and mode env var it reads (`PUBLIC_SIGNUP_ENABLED`, `RETAIN_DATA`, `ALERT_EMAIL`, `MONTHLY_BUDGET_USD`, `API_RATE_LIMIT`/`API_BURST_LIMIT`, `AGENT_AUTH_MODE`, `AGENT_IMAGE_PLATFORM`) and throws a descriptive error on an unrecognized value, rather than silently falling back
+- The frontend auth config still logs a warning and continues when Cognito values are missing in [chatbot-frontend/src/lib/auth.ts](chatbot-frontend/src/lib/auth.ts)
+- Runtime configuration is still distributed across multiple `.env` files with no root orchestration or schema validation
+- `agent/` and `chatbot-bff/` still depend directly on `process.env` without a shared validation layer
 
 Recommendation:
 
-- Introduce schema validation for environment variables in each package, preferably at startup
-- Fail fast with actionable error messages for required config by mode
+- Extend the infra package's fail-fast validation pattern to `agent/` and `chatbot-bff/`
 - Add a documented configuration matrix showing which variables are required in local direct mode, local BFF mode, and deployed environments
 
 ## Medium-priority gaps
 
 ### 6. Infrastructure defaults are not production-safe
 
-Impact: medium
+Impact: medium → mostly addressed
 
-Evidence:
+Evidence (current):
 
-- Multiple stacks use `RemovalPolicy.DESTROY`, including Cognito and frontend storage, in [infra/src/stacks/auth-stack.ts](infra/src/stacks/auth-stack.ts#L35) and [infra/src/stacks/frontend-stack.ts](infra/src/stacks/frontend-stack.ts#L37)
-- Lambda logs are retained for only one week in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts#L35)
-- The AgentCore runtime is configured for public network mode in [infra/src/stacks/agent-stack.ts](infra/src/stacks/agent-stack.ts#L157)
+- The user pool and the frontend bucket now default to `RemovalPolicy.RETAIN`, controlled by `RETAIN_DATA` (default `true`) — see [infra/src/stacks/auth-stack.ts](infra/src/stacks/auth-stack.ts) and [infra/src/stacks/frontend-stack.ts](infra/src/stacks/frontend-stack.ts). `RETAIN_DATA=false` opts back into `DESTROY` for disposable environments; documented in [infra/README.md](infra/README.md#guardrails)
+- Lambda log retention is one month, not one week, in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts)
+- API Gateway access logs, CloudWatch alarms (chat/admin Lambda errors, API 5XX), and an optional monthly budget were added — see gap #8
+
+Remaining:
+
+- The AgentCore runtime is still configured for public network mode in [infra/src/stacks/agent-stack.ts](infra/src/stacks/agent-stack.ts)
 
 Recommendation:
 
-- Use environment-specific removal policies
-- Extend retention and centralize logs/metrics for production environments
 - Reassess whether public network mode is required for the runtime in target environments
 
 ### 7. Dependency management is not strict enough
@@ -143,8 +146,8 @@ Impact: medium
 
 Evidence:
 
-- Critical dependencies are declared as `latest`, including `@aws-sdk/client-bedrock-agentcore` and `@strands-agents/sdk` in [agent/package.json](agent/package.json#L12)
-- The BFF also uses `latest` for AgentCore SDK in [chatbot-bff/package.json](chatbot-bff/package.json#L10)
+- Critical dependencies are declared as `latest`, including `@aws-sdk/client-bedrock-agentcore` and `@strands-agents/sdk` in [agent/package.json](agent/package.json)
+- The BFF also uses `latest` for `@aws-sdk/client-bedrock-agentcore` and the newly-added `@aws-sdk/client-cognito-identity-provider` in [chatbot-bff/package.json](chatbot-bff/package.json)
 
 Recommendation:
 
@@ -153,22 +156,24 @@ Recommendation:
 
 ### 8. Operational observability is minimal
 
-Impact: medium
+Impact: medium → partially addressed
 
-Why it matters:
+Evidence (current):
 
-- Production agents need traceability around latency, failures, tool calls, auth failures, and downstream dependency issues
+- The BFF's admin routes now emit one structured JSON audit line per privileged action (actor, action, target, outcome) — see `auditRecord` in [chatbot-bff/src/admin.ts](chatbot-bff/src/admin.ts)
+- API Gateway access logs are always on (identity and outcome, never the request body) in `/aws/apigateway/<project>-chat-api`
+- Three CloudWatch alarms (chat Lambda errors, admin Lambda errors, API 5XX) publish to an SNS topic, optionally subscribed via `ALERT_EMAIL` — see [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts) and [infra/README.md](infra/README.md#guardrails)
 
-Evidence:
+Remaining:
 
-- Logging is mostly console-based in the BFF and agent runtime
-- There is no structured logging convention, correlation ID propagation, or dashboard/alarm definition in the repo
+- Chat-path and agent-runtime logging is still plain `console.log`/`console.error`, with no structured convention or request/session correlation ID propagation
+- No latency, invocation-count, or downstream tool-failure metrics; no dashboard, only error-count alarms
 
 Recommendation:
 
-- Standardize structured logs with request/session correlation identifiers
-- Define baseline CloudWatch dashboards and alarms
-- Add metrics around invocation count, latency, error rate, and downstream tool failures
+- Standardize structured logs with request/session correlation identifiers across the chat path and the agent runtime, matching the pattern already used for admin audit logs
+- Define a baseline CloudWatch dashboard
+- Add metrics around invocation count, latency, and downstream tool failures
 
 ### 9. Monorepo ergonomics are incomplete
 
@@ -186,30 +191,19 @@ Recommendation:
 
 ### 10. Architecture decisions still have unresolved TODOs
 
-Impact: medium
+Impact: medium → resolved
 
-Evidence:
+The TODO this pointed at — whether the Cognito identity pool's authenticated role should keep a blanket `bedrock-agentcore:InvokeAgentRuntime` grant — is gone. That role now carries no policy of its own; the agent stack grants the permission scoped to its one runtime ARN (see [infra/src/stacks/agent-stack.ts](infra/src/stacks/agent-stack.ts) and the note in [infra/src/stacks/auth-stack.ts](infra/src/stacks/auth-stack.ts)). This also closed a real gap: previously any signed-in user could invoke *any* agent runtime in the account, not just this deployment's.
 
-- There is an explicit TODO about the direct-mode IAM policy in [infra/src/stacks/auth-stack.ts](infra/src/stacks/auth-stack.ts#L93)
-
-Recommendation:
-
-- Finalize the direct-mode contract
-- Remove permissions and configuration paths that are not part of the supported design
+No other unresolved architecture TODOs are currently present in `infra/src`.
 
 ## Lower-priority improvements
 
 ### 11. Module-level docs need expansion
 
-Impact: low
+Impact: low → resolved
 
-Evidence:
-
-- [chatbot-frontend/README.md](chatbot-frontend/README.md) and [infra/README.md](infra/README.md) are placeholders
-
-Recommendation:
-
-- Expand each module README with setup, environment variables, local run steps, and deployment boundaries
+[chatbot-frontend/README.md](chatbot-frontend/README.md), [chatbot-bff/README.md](chatbot-bff/README.md), and [infra/README.md](infra/README.md) now cover setup, environment variables, local run steps, deployment boundaries, and the auth/admin/guardrail behavior specific to each package. [agent/README.md](agent/README.md) was already substantive and remains so.
 
 ### 12. A production operating model is not documented
 
@@ -226,12 +220,15 @@ Recommendation:
 - Runtime config injection for the static frontend is a practical choice for a demo and a useful production pattern when hardened
 - The BFF correctly centralizes AgentCore SigV4 invocation when that pattern is desired
 - The agent package demonstrates local execution, local MCP tooling, and deployed invocation paths
+- Auth supports both public self sign-up and an invite-only mode (`PUBLIC_SIGNUP_ENABLED`), with the pool-level enforcement and the frontend flow kept in sync
+- The admin panel's authorization boundary is enforced server-side, not just hidden client-side: the BFF's admin routes re-check `cognito:groups` on every call, so a stale or forged client claim can under-grant access but never over-grant it
+- IAM grants follow least privilege where recently touched: the Cognito authenticated role carries no policy of its own, and the admin Lambda's Cognito permissions are scoped to specific actions on one user pool ARN
 
 ## Recommended path to “production ready”
 
 ### Phase 1: reliability and correctness
 
-- Align all README files with the current auth and integration behavior
+- ~~Align all README files with the current auth and integration behavior~~ — done
 - Add CI for install, lint, typecheck, build, and CDK synth
 - Add tests for the stream parser, BFF handler, and config mode selection
 - Pin runtime-critical dependencies
@@ -240,8 +237,8 @@ Recommendation:
 
 - Replace permissive CORS with environment-specific allowlists
 - Move secret material to managed secret stores
-- Add structured logging, metrics, alarms, and trace correlation
-- Rework destructive infrastructure defaults for long-lived environments
+- Extend structured logging and correlation IDs from the admin routes to the chat path and the agent runtime; add latency/invocation metrics and a dashboard
+- ~~Rework destructive infrastructure defaults for long-lived environments~~ — done (`RETAIN_DATA`, longer log retention, alarms, budget)
 
 ### Phase 3: platform maturity
 
@@ -251,6 +248,6 @@ Recommendation:
 
 ## Final assessment
 
-If the goal is a professional demo/reference repository, this codebase is close once the documentation is corrected and the positioning is explicit.
+If the goal is a professional demo/reference repository, this codebase is close: the documentation is now aligned with behavior, module READMEs are substantive, and the auth/infra defaults no longer contradict what the docs claim.
 
-If the goal is a production-ready template, the repo still needs meaningful work in CI/CD, test coverage, security hardening, observability, and environment validation before it should be used as a baseline for a real customer-facing deployment.
+If the goal is a production-ready template, the repo still needs meaningful work in CI/CD, test coverage, CORS/secrets hardening, and chat-path/agent-runtime observability before it should be used as a baseline for a real customer-facing deployment.

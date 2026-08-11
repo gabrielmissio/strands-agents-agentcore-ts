@@ -1,8 +1,8 @@
 # Chatbot BFF
 
-Thin Backend-for-Frontend that accepts chat requests and invokes AgentCore with SigV4.
+Thin Backend-for-Frontend that accepts chat requests and invokes AgentCore with SigV4, plus an admin API for user management.
 
-This package owns the streaming proxy layer used by the chatbot application. Repository-level architecture and deployment context live in the root [README.md](../README.md).
+This package owns the streaming proxy layer used by the chatbot application, and the server-side half of the admin panel. Repository-level architecture and deployment context live in the root [README.md](../README.md).
 
 ## Local setup
 
@@ -36,14 +36,15 @@ Use [chatbot-bff/.env.example](.env.example) as the source of truth.
 | `AWS_REGION` | No | AWS region for the AgentCore client |
 | `ALLOWED_ORIGIN` | No | Allowed browser origin for CORS |
 | `AGENT_RUNTIME_ARN` | Yes | Target Bedrock AgentCore runtime ARN |
-| `COGNITO_USER_POOL_ID` | For `/admin/*` | User pool the admin routes list/create users in |
-| `ADMIN_GROUP_NAME` | No | Cognito group checked for admin routes. Defaults to `admins`, matching `ADMIN_GROUP_NAME` in `infra/src/stacks/auth-stack.ts` |
+
+Two more, `COGNITO_USER_POOL_ID` and `ADMIN_GROUP_NAME`, are set on the deployed admin Lambda by `infra/src/stacks/bff-stack.ts` — they are not part of `.env.example` because the local dev server (`local.ts`) only exercises `/chat`, never the admin routes. See [Admin routes](#admin-routes) below.
 
 ## Behavior notes
 
 - The BFF invokes AgentCore with SigV4 using AWS credentials available to the process or Lambda function
 - In the deployed path, the `/chat` endpoint is protected by Cognito at API Gateway
 - The local development server is intended to exercise the streaming proxy behavior; it does not perform Cognito token validation itself
+- Every AgentCore session id is namespaced to the authenticated caller's Cognito `sub` (see `resolveSessionId`/`sessionNamespace` in [`src/session.ts`](src/session.ts)). A client-supplied id is only reused if it carries *that caller's* namespace; otherwise a fresh one is minted silently. Without this, a session id — effectively a bearer token for AgentCore conversation history — could be replayed by any other authenticated user
 
 ## Admin routes
 

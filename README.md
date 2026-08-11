@@ -14,8 +14,9 @@ It is designed for anyone looking for a practical starting point to quickly depl
 * A Strands-based agent running on Amazon Bedrock AgentCore Runtime
 * A React chatbot frontend
 * An AWS Lambda-based BFF for proxied integration
-* Amazon Cognito authentication for browser access
-* AWS CDK infrastructure for runtime, auth, frontend hosting, and BFF
+* Amazon Cognito authentication for browser access, with public self sign-up or invite-only enrollment controlled by a single env var
+* An admin panel and API for inviting users and managing access without leaving the browser
+* AWS CDK infrastructure for runtime, auth, frontend hosting, and BFF, with opt-in operational guardrails (data retention, spend alarms, request throttling)
 
 ## Prerequisites
 
@@ -114,6 +115,8 @@ Important configuration switches:
 
 * `VITE_AGENT_MODE` — frontend integration mode
 * `AGENT_AUTH_MODE` — deployment/auth mode used by the infrastructure
+* `PUBLIC_SIGNUP_ENABLED` — public self sign-up (default) vs. invite-only auth; see [infra/README.md](infra/README.md#user-provisioning-invite-only)
+* `RETAIN_DATA`, `ALERT_EMAIL`, `MONTHLY_BUDGET_USD`, `API_RATE_LIMIT`/`API_BURST_LIMIT` — opt-in operational guardrails; see [infra/README.md](infra/README.md#guardrails)
 
 See each package’s `.env.example` file for the full list of settings.
 
