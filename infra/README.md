@@ -41,8 +41,26 @@ Use [infra/.env.example](.env.example) as the source of truth.
 | `PROJECT_NAME` | Yes | Prefix used for stack and resource naming |
 | `AGENT_IMAGE_PLATFORM` | No | Docker platform for the agent image build |
 | `AGENT_AUTH_MODE` | No | Agent runtime auth mode. Also derives the deployed frontend transport mode: `JWT` -> `direct`, `SIGV4` -> `bff` |
+| `PUBLIC_SIGNUP_ENABLED` | No | `true` (default): visitors can self sign-up. `false`: invite-only — see below |
 
 Additional runtime environment variables for the agent can also be passed through this package, including model and tool configuration.
+
+## User provisioning (invite-only)
+
+With `PUBLIC_SIGNUP_ENABLED=false`, self sign-up is disabled at the Cognito pool level — not just hidden in the UI, the public `SignUp` API rejects the client too. Every account is created by an operator:
+
+```bash
+COGNITO_USER_POOL_ID=$(aws cloudformation describe-stacks --stack-name "${PROJECT_NAME}-auth" \
+  --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text)
+
+aws cognito-idp admin-create-user \
+  --user-pool-id "$COGNITO_USER_POOL_ID" \
+  --username "new-user@example.com" \
+  --user-attributes Name=email,Value="new-user@example.com" Name=email_verified,Value=true \
+  --desired-delivery-mediums EMAIL
+```
+
+Cognito emails the address a temporary password. On first sign-in the frontend's auth screen answers Cognito's `NEW_PASSWORD_REQUIRED` challenge, and the user picks their own password.
 
 ## Notes
 
@@ -50,3 +68,4 @@ Additional runtime environment variables for the agent can also be passed throug
 - The agent image defaults to `linux/arm64`
 - The deployed frontend transport is derived from `AGENT_AUTH_MODE`; there is no separate infra-level frontend mode switch
 - If Docker cannot build the ARM64 image locally, use the troubleshooting guidance in the root [README.md](../README.md#troubleshooting)
+- All scripts run through `dotenvx run -f .env --overload`. Without `--overload`, `dotenvx` does not override a variable already exported in the shell — a stale `export PROJECT_NAME=…` left in a terminal would silently win over `.env` and deploy against the wrong stacks with no warning.

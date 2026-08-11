@@ -19,6 +19,8 @@ export interface FrontendStackProps extends cdk.StackProps {
   cognitoIdentityPoolId: string
   cognitoRegion: string
   agentRuntimeArn: string
+  /** Mirrors AuthStackProps.publicSignUpEnabled — tells the SPA which auth screen to render. */
+  publicSignUpEnabled: boolean
 }
 
 export class FrontendStack extends cdk.Stack {
@@ -36,6 +38,7 @@ export class FrontendStack extends cdk.Stack {
       cognitoIdentityPoolId,
       cognitoRegion,
       agentRuntimeArn,
+      publicSignUpEnabled,
     } = props
 
     // ── S3 bucket (private — no public access) ─────────────────────────
@@ -102,28 +105,54 @@ export class FrontendStack extends cdk.Stack {
       VITE_COGNITO_USER_POOL_CLIENT_ID: cognitoUserPoolClientId,
       VITE_COGNITO_IDENTITY_POOL_ID: cognitoIdentityPoolId,
       VITE_AGENT_RUNTIME_ARN: agentRuntimeArn,
+      VITE_PUBLIC_SIGNUP_ENABLED: String(publicSignUpEnabled),
     })};`
 
     // ── Deploy pre-built frontend assets ──────────────────────────────
     // Expects `chatbot-frontend` to be built before `cdk deploy` runs.
     // Add `npm run build` in chatbot-frontend/ to your CI pipeline first.
-    new s3deploy.BucketDeployment(this, 'DeployFrontend', {
+    //
+    // Two deployments, because the two kinds of file need opposite cache headers and a single
+    // `BucketDeployment` can only carry one `cacheControl`. Stamping `immutable, max-age=31536000`
+    // on every object — index.html included — is a real bug, not a hypothetical one: index.html is
+    // what names the content-hashed bundle files, so a browser told to keep it for a year without
+    // revalidating goes on requesting the bundle names of a build that no longer exists. Invalidating
+    // the CloudFront distribution does not help, because the stale copy lives in the browser's own
+    // cache — the request that would have hit the invalidated edge is never made.
+    //
+    // `prune: false` on both: two deployments writing to one bucket with pruning on would each
+    // delete the other's files.
+
+    // Content-hashed by Vite, so the filename changes whenever the bytes do. Safe to cache forever;
+    // `immutable` is what stops the browser revalidating them on every reload.
+    const assets = new s3deploy.BucketDeployment(this, 'DeployAssets', {
+      sources: [s3deploy.Source.asset('../chatbot-frontend/dist', { exclude: ['index.html'] })],
+      destinationBucket: siteBucket,
+      memoryLimit: 256,
+      prune: false,
+      cacheControl: [s3deploy.CacheControl.fromString('public, max-age=31536000, immutable')],
+    })
+
+    // The two files whose names never change, and which name everything else. `no-cache` does not
+    // mean "do not store" — it means the browser must revalidate before reusing it, so a deploy is
+    // picked up on the next navigation.
+    const entrypoint = new s3deploy.BucketDeployment(this, 'DeployEntrypoint', {
       sources: [
-        s3deploy.Source.asset('../chatbot-frontend/dist'),
+        s3deploy.Source.asset('../chatbot-frontend/dist', { exclude: ['*', '!index.html'] }),
         s3deploy.Source.data('config.js', configContent),
       ],
       destinationBucket: siteBucket,
       distribution,
-      distributionPaths: ['/*'],
+      // Only these need invalidating — a hashed asset is never stale, it is either present or it is
+      // a new name.
+      distributionPaths: ['/', '/index.html', '/config.js'],
       memoryLimit: 256,
-      // Cache control: aggressively cache assets (Vite hashes filenames),
-      // but never cache index.html or config.js
-      cacheControl: [
-        s3deploy.CacheControl.fromString(
-          'public, max-age=31536000, immutable',
-        ),
-      ],
+      prune: false,
+      cacheControl: [s3deploy.CacheControl.fromString('no-cache, must-revalidate')],
     })
+
+    // index.html names the hashed bundles, so it must never land before them.
+    entrypoint.node.addDependency(assets)
 
     // ── Grant CloudFront OAC read access to the bucket ─────────────────
     siteBucket.addToResourcePolicy(

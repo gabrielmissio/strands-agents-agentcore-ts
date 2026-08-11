@@ -5,36 +5,72 @@ import { Construct } from 'constructs'
 
 export interface AuthStackProps extends cdk.StackProps {
   projectName: string
+  /**
+   * Whether visitors can create their own account. Defaults to `true` — a demo/template deployment
+   * wants the lowest-friction path to trying it. Set `false` (via `PUBLIC_SIGNUP_ENABLED=false`) for
+   * an invite-only deployment: self sign-up is disabled at the pool level (blocking the public
+   * `SignUp` API, not just the UI), and an operator provisions every account with
+   * `aws cognito-idp admin-create-user` (see `infra/README.md`). The user then signs in with the
+   * temporary password Cognito emails them and is prompted to choose a new one.
+   */
+  publicSignUpEnabled?: boolean
 }
 
 /**
  * Creates a Cognito User Pool + Identity Pool for frontend-to-AgentCore auth.
  *
- * Flow:
- *   1. User signs up / signs in via Cognito Hosted UI or API
+ * Flow (public sign-up):
+ *   1. User signs up / signs in via the frontend's auth screen
  *   2. Frontend gets JWT id token + access token
  *   3. Frontend calls AgentCore `/runtimes/{arn}/invocations` with `Authorization: Bearer <accessToken>`
  *   4. AgentCore validates the JWT via the User Pool's OIDC discovery URL
+ *
+ * Flow (invite-only, `publicSignUpEnabled: false`):
+ *   1. An admin creates the user; Cognito emails a temporary password
+ *   2. User signs in, Cognito answers with the NEW_PASSWORD_REQUIRED challenge, user picks a password
+ *   3-4. Same as above
  */
 export class AuthStack extends cdk.Stack {
   public readonly userPool: cognito.UserPool
   public readonly userPoolClient: cognito.UserPoolClient
   public readonly identityPool: cognito.CfnIdentityPool
+  /**
+   * Assumed by every signed-in browser — the identity pool vends its credentials to the client via
+   * `fetchAuthSession()`. No policy is attached to it here; grant permissions on it only scoped to a
+   * specific resource, from the stack that owns that resource (see `AgentStackProps.invokerRole`).
+   */
+  public readonly authenticatedRole: iam.Role
 
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props)
 
-    const { projectName } = props
+    const { projectName, publicSignUpEnabled = true } = props
 
     // ── User Pool ──────────────────────────────────────────────────────
     this.userPool = new cognito.UserPool(this, 'UserPool', {
       userPoolName: `${projectName}-users`,
-      selfSignUpEnabled: true,
+      selfSignUpEnabled: publicSignUpEnabled,
       signInAliases: { email: true },
       autoVerify: { email: true },
       standardAttributes: {
         email: { required: true, mutable: true },
       },
+      // Only used when invite-only: the message Cognito sends an admin-created user along with
+      // their temporary password. Ignored when self sign-up is enabled — nobody is invited.
+      ...(publicSignUpEnabled
+        ? {}
+        : {
+            userInvitation: {
+              emailSubject: `Your ${projectName} access`,
+              emailBody: [
+                'Hello {username},',
+                '',
+                'An account was created for you. Sign in with this temporary password and choose a new one:',
+                '',
+                '{####}',
+              ].join('<br/>'),
+            },
+          }),
       passwordPolicy: {
         minLength: 8,
         requireLowercase: true,
@@ -74,7 +110,7 @@ export class AuthStack extends cdk.Stack {
     })
 
     // ── IAM role for authenticated Cognito users ───────────────────────
-    const authenticatedRole = new iam.Role(this, 'AuthenticatedRole', {
+    this.authenticatedRole = new iam.Role(this, 'AuthenticatedRole', {
       assumedBy: new iam.FederatedPrincipal(
         'cognito-identity.amazonaws.com',
         {
@@ -90,23 +126,19 @@ export class AuthStack extends cdk.Stack {
       description: 'Role for authenticated Cognito users',
     })
 
-    // TODO: Revisit whether this policy should stay once the direct-mode auth
-    // contract is finalized. The current frontend direct flow uses JWT bearer
-    // tokens, but keeping invoke permission here preserves the option to switch
-    // direct mode to Cognito-issued AWS credentials without another infra change.
-    authenticatedRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ['bedrock-agentcore:InvokeAgentRuntime'],
-        resources: ['*'],
-      }),
-    )
+    // No policy is attached here on purpose. This role is assumable by every signed-in user, so
+    // anything granted here is granted to anyone who can sign in and open devtools. It used to carry
+    // `bedrock-agentcore:InvokeAgentRuntime` on `*`, which let any signed-in user invoke *any* agent
+    // runtime in the account. The permission is now attached by the agent stack, scoped to the one
+    // runtime ARN it owns — see `AgentStackProps.invokerRole`. It has to be granted from there: a
+    // policy declared here that referenced the runtime ARN would make this stack depend on the agent
+    // stack, which already depends on this one for the Cognito discovery URL.
 
     // Attach the role to the Identity Pool
     new cognito.CfnIdentityPoolRoleAttachment(this, 'IdentityPoolRoles', {
       identityPoolId: this.identityPool.ref,
       roles: {
-        authenticated: authenticatedRole.roleArn,
+        authenticated: this.authenticatedRole.roleArn,
       },
     })
 

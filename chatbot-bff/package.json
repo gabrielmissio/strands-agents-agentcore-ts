@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
-    "dev": "dotenvx run -f .env -- tsx src/local.ts"
+    "dev": "dotenvx run -f .env --overload -- tsx src/local.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-agentcore": "latest"

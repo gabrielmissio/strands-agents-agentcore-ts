@@ -8,13 +8,13 @@
     "docker:setup-arm64": "docker run --privileged --rm tonistiigi/binfmt --install arm64",
     "build:dependencies": "npm --prefix ../chatbot-bff run build && npm --prefix ../chatbot-frontend run build",
     "presynth": "npm run build:dependencies",
-    "synth": "dotenvx run -f .env -- cdk synth",
+    "synth": "dotenvx run -f .env --overload -- cdk synth",
     "predeploy": "npm run build:dependencies",
-    "deploy": "dotenvx run -f .env -- cdk deploy --all --require-approval never",
-    "destroy": "dotenvx run -f .env -- cdk destroy --all",
-    "deploy:agent": "dotenvx run -f .env -- cdk deploy poc-strands-agents-agent --require-approval never",
+    "deploy": "dotenvx run -f .env --overload -- cdk deploy --all --require-approval never",
+    "destroy": "dotenvx run -f .env --overload -- cdk destroy --all",
+    "deploy:agent": "dotenvx run -f .env --overload -- cdk deploy poc-strands-agents-agent --require-approval never",
     "predeploy:bff": "npm --prefix ../chatbot-bff run build",
-    "deploy:bff": "dotenvx run -f .env -- cdk deploy poc-strands-agents-bff --require-approval never"
+    "deploy:bff": "dotenvx run -f .env --overload -- cdk deploy poc-strands-agents-bff --require-approval never"
   },
   "dependencies": {
     "aws-cdk-lib": "^2.250.0",

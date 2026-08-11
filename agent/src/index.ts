@@ -1,5 +1,5 @@
 import express, { type Request, type Response } from 'express'
-import { agent } from './agent'
+import { createAgent } from './agent'
 
 const app = express()
 const PORT = process.env.PORT || 8080
@@ -25,7 +25,8 @@ app.post('/invocations', express.raw({ type: '*/*' }), async (req: Request, res:
     res.setHeader('Connection', 'keep-alive')
     res.flushHeaders()
 
-    const stream = agent.stream(prompt)
+    // A fresh agent per request — see the comment on createAgent() for why one must not be shared.
+    const stream = createAgent().stream(prompt)
 
     for await (const event of stream) {
       const json = JSON.stringify(event)

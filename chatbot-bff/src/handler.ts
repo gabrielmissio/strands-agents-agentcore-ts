@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEvent } from 'aws-lambda'
 import type { Writable } from 'node:stream'
-import { randomUUID } from 'node:crypto'
 import { invokeAgentStream } from './agent-client.js'
+import { resolveSessionId } from './session.js'
 
 const AGENT_RUNTIME_ARN = process.env.AGENT_RUNTIME_ARN ?? ''
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? '*'
@@ -85,6 +85,20 @@ export const handler = awslambda.streamifyResponse(
     }
 
     try {
+      // The Cognito authorizer on the API Gateway route (see infra/src/stacks/bff-stack.ts) puts the
+      // caller's verified claims here. Its absence means the route is misconfigured or being hit
+      // some other way — either way, there is no caller identity to bind a session to, so this fails
+      // closed rather than falling back to an unbound one.
+      const userId = (event.requestContext.authorizer as { claims?: { sub?: string } } | undefined)
+        ?.claims?.sub
+
+      if (!userId) {
+        writeSseEvent(responseStream, 'error', { error: 'Unauthenticated' })
+        writeSseEvent(responseStream, 'done', { ok: false })
+        responseStream.end()
+        return
+      }
+
       const parsedBody: RequestBody = JSON.parse(event.body ?? '{}')
       const message = parsedBody.message
 
@@ -97,10 +111,10 @@ export const handler = awslambda.streamifyResponse(
         return
       }
 
-      const sessionId =
-        typeof parsedBody.sessionId === 'string' && parsedBody.sessionId.length >= 33
-          ? parsedBody.sessionId
-          : randomUUID()
+      // Only a session id minted for this caller is honored — see session.ts. A session id is a
+      // bearer token for AgentCore conversation history; without this, one signed-in user could read
+      // or continue another user's conversation just by supplying their session id.
+      const sessionId = resolveSessionId(parsedBody.sessionId, userId)
 
       writeSseEvent(responseStream, 'session', { sessionId })
 

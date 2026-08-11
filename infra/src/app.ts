@@ -36,6 +36,16 @@ function pickDefinedEnvironment(keys: string[]) {
   ) as Record<string, string>
 }
 
+function resolvePublicSignUpEnabled(input?: string): boolean {
+  const normalized = input?.trim().toLowerCase()
+
+  if (!normalized) return true
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true
+
+  throw new Error(`Unsupported PUBLIC_SIGNUP_ENABLED: ${input}`)
+}
+
 function resolveAgentImagePlatform(input?: string) {
   const normalized = input?.trim().toLowerCase()
 
@@ -69,9 +79,14 @@ const agentImagePlatform = resolveAgentImagePlatform(
   app.node.tryGetContext('agentImagePlatform') ?? process.env.AGENT_IMAGE_PLATFORM,
 )
 
+const publicSignUpEnabled = resolvePublicSignUpEnabled(
+  app.node.tryGetContext('publicSignUpEnabled') ?? process.env.PUBLIC_SIGNUP_ENABLED,
+)
+
 // ── Auth (Cognito User Pool + Identity Pool) ───────────────────────────
 const authStack = new AuthStack(app, `${projectName}-auth`, {
   projectName,
+  publicSignUpEnabled,
   env,
 })
 
@@ -82,6 +97,8 @@ const agentStack = new AgentStack(app, `${projectName}-agent`, {
   imagePlatform: agentImagePlatform,
   cognitoDiscoveryUrl: `https://cognito-idp.${env.region ?? 'us-east-1'}.amazonaws.com/${authStack.userPool.userPoolId}/.well-known/openid-configuration`,
   cognitoUserPoolClientId: authStack.userPoolClient.userPoolClientId,
+  // Scoped grant to invoke this one runtime — see the note in auth-stack.ts.
+  invokerRole: authStack.authenticatedRole,
   runtimeEnvironment: pickDefinedEnvironment([
     'BEDROCK_MODEL_ID',
     'EXCHANGE_RATE_MCP_URL',
@@ -114,6 +131,7 @@ const frontendStack = new FrontendStack(app, `${projectName}-frontend`, {
   cognitoIdentityPoolId: authStack.identityPool.ref,
   cognitoRegion: env.region ?? 'us-east-1',
   agentRuntimeArn: agentStack.runtimeArn,
+  publicSignUpEnabled,
   env,
 })
 frontendStack.addDependency(bffStack)

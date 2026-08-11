@@ -8,6 +8,7 @@ type AppConfig = Partial<{
   VITE_COGNITO_USER_POOL_ID: string
   VITE_COGNITO_USER_POOL_CLIENT_ID: string
   VITE_COGNITO_IDENTITY_POOL_ID: string
+  VITE_PUBLIC_SIGNUP_ENABLED: string
 }>
 
 declare global {

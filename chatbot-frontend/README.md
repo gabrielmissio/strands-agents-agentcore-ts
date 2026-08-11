@@ -31,6 +31,13 @@ Set `VITE_AGENT_MODE` in [chatbot-frontend/.env.example](.env.example) for local
 
 The current implementation requires Cognito sign-in before the chat UI is available in both modes.
 
+## Sign-up mode
+
+`VITE_PUBLIC_SIGNUP_ENABLED` (mirrors `PUBLIC_SIGNUP_ENABLED` in `infra/`, injected via `config.js` in deployed environments) toggles which auth screen [`AuthScreen`](src/components/AuthScreen.tsx) renders:
+
+- `true` (default): sign in, or sign up and confirm via email code.
+- `false`: sign in only — no sign-up form. An admin provisions the account (see [infra/README.md](../infra/README.md#user-provisioning-invite-only)), and the first sign-in answers Cognito's `NEW_PASSWORD_REQUIRED` challenge to replace the temporary password.
+
 ## Environment variables
 
 Use [chatbot-frontend/.env.example](.env.example) as the source of truth.
@@ -47,6 +54,7 @@ Use [chatbot-frontend/.env.example](.env.example) as the source of truth.
 | `VITE_AGENT_ENDPOINT_NAME` | No | AgentCore qualifier, defaults to `DEFAULT` |
 | `VITE_AWS_REGION` | Yes | AWS region used by the frontend config |
 | `VITE_AGENTCORE_URL` | No | Optional explicit AgentCore base URL override |
+| `VITE_PUBLIC_SIGNUP_ENABLED` | No | `false` hides self sign-up and switches the auth screen to invite-only. Defaults to enabled |
 
 ## Notes
 

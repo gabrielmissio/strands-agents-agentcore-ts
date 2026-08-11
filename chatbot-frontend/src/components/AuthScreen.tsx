@@ -1,24 +1,45 @@
 import { useState } from 'react'
-import { signIn, signUp, confirmSignUp, type SignInOutput } from 'aws-amplify/auth'
+import { confirmSignIn, confirmSignUp, signIn, signUp, type SignInOutput } from 'aws-amplify/auth'
+import { isPublicSignUpEnabled } from '@/lib/auth.ts'
 
-type AuthView = 'signIn' | 'signUp' | 'confirmSignUp'
+type AuthView = 'signIn' | 'signUp' | 'confirmSignUp' | 'newPassword'
 
 export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const publicSignUp = isPublicSignUpEnabled()
   const [view, setView] = useState<AuthView>('signIn')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmCode, setConfirmCode] = useState('')
+  const [newPassword, setNewPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  /**
+   * Routes a sign-in/challenge result to the next view.
+   *
+   * `CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED` is the challenge Cognito returns on an
+   * admin-created user's first sign-in (their password is a temporary one) — it can happen whether
+   * or not public sign-up is enabled, since an admin can always create a user directly.
+   */
+  const applyResult = (result: SignInOutput) => {
+    if (result.isSignedIn) {
+      onAuthenticated()
+      return
+    }
+
+    if (result.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+      setView('newPassword')
+      return
+    }
+
+    setError(`Unsupported sign in step: ${result.nextStep.signInStep}. Contact an administrator.`)
+  }
 
   const handleSignIn = async () => {
     setError('')
     setLoading(true)
     try {
-      const result: SignInOutput = await signIn({ username: email, password })
-      if (result.isSignedIn) {
-        onAuthenticated()
-      }
+      applyResult(await signIn({ username: email, password }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Sign in failed')
     } finally {
@@ -60,11 +81,24 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
     }
   }
 
+  const handleNewPassword = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      applyResult(await confirmSignIn({ challengeResponse: newPassword }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not set the new password')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (view === 'signIn') handleSignIn()
     else if (view === 'signUp') handleSignUp()
-    else handleConfirm()
+    else if (view === 'confirmSignUp') handleConfirm()
+    else handleNewPassword()
   }
 
   return (
@@ -77,6 +111,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
           {view === 'signIn' && '🦴 Sign In'}
           {view === 'signUp' && '🪨 Sign Up'}
           {view === 'confirmSignUp' && '✨ Verify Email'}
+          {view === 'newPassword' && '🔑 New Password'}
         </h2>
 
         {error && (
@@ -85,7 +120,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
           </div>
         )}
 
-        {view !== 'confirmSignUp' ? (
+        {(view === 'signIn' || view === 'signUp') && (
           <>
             <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-cave/70">
               Email
@@ -112,7 +147,9 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
               required
             />
           </>
-        ) : (
+        )}
+
+        {view === 'confirmSignUp' && (
           <>
             <p className="mb-3 text-center text-sm font-semibold text-cave/70">
               Check your email for a verification code
@@ -132,6 +169,26 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
           </>
         )}
 
+        {view === 'newPassword' && (
+          <>
+            <p className="mb-3 text-center text-sm font-semibold text-cave/70">
+              Choose a password to replace the temporary one
+            </p>
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-cave/70">
+              New Password
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="stone-tablet mb-4 w-full px-3 py-2 text-sm font-semibold text-cave placeholder:text-cave/50 focus:outline-none"
+              placeholder="••••••••"
+              required
+              autoFocus
+            />
+          </>
+        )}
+
         <button
           type="submit"
           disabled={loading}
@@ -143,15 +200,22 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
               ? 'Enter Cave'
               : view === 'signUp'
                 ? 'Create Account'
-                : 'Verify'}
+                : view === 'confirmSignUp'
+                  ? 'Verify'
+                  : 'Set Password'}
         </button>
 
-        {view === 'signIn' && (
+        {view === 'signIn' && publicSignUp && (
           <p className="mt-3 text-center text-xs font-semibold text-cave/60">
             No account?{' '}
             <button type="button" onClick={() => { setView('signUp'); setError('') }} className="text-moss underline">
               Sign Up
             </button>
+          </p>
+        )}
+        {view === 'signIn' && !publicSignUp && (
+          <p className="mt-3 text-center text-xs font-semibold text-cave/60">
+            Accounts are created by an administrator — ask for an invite to get a temporary password.
           </p>
         )}
         {view === 'signUp' && (
