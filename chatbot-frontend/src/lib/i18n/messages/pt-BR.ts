@@ -11,6 +11,8 @@ export const ptBR = {
   'common.signOut': 'Sair',
   'common.signOutLabel': 'Sair',
   'common.language': 'Idioma',
+  'common.connectedAs': 'Conectado como',
+  'common.userMenu': 'Menu do usuário',
 
   'auth.signInTitle': '🦴 Entrar',
   'auth.signUpTitle': '🪨 Criar Conta',

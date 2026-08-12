@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { LogOut, Send, ShieldCheck, Sparkles } from 'lucide-react'
+import { Send, ShieldCheck, Sparkles } from 'lucide-react'
+import { UserMenu } from './UserMenu.tsx'
 import cavemanMascot from '@/assets/caveman-mascot.png'
 import { ChatBubble, type ChatMessage } from './ChatBubble.tsx'
 import { ThinkingBubble } from './ThinkingBubble.tsx'
@@ -270,32 +271,14 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
                 type="button"
                 onClick={onOpenAdmin}
                 title={t('chat.adminPanelTitle')}
-                className="flex items-center gap-1 rounded-xl border-[3px] border-cave bg-fire px-2 py-1 font-display text-[10px] uppercase tracking-wider text-fire-foreground shadow-[var(--shadow-stone)] transition active:translate-y-0.5 active:shadow-none"
+                className="flex h-9 items-center gap-1.5 rounded-xl border-[3px] border-cave bg-fire px-3 font-display text-[10px] uppercase tracking-wider text-fire-foreground shadow-[var(--shadow-stone)] transition active:translate-y-0.5 active:shadow-none"
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
                 {t('chat.adminLink')}
               </button>
             )}
-            {userEmail && (
-              <span
-                className="hidden max-w-[14rem] truncate text-xs font-semibold text-muted-foreground sm:block"
-                title={userEmail}
-              >
-                {userEmail}
-              </span>
-            )}
             {onSignOut && (
-              <button
-                type="button"
-                onClick={handleSignOut}
-                disabled={signingOut}
-                title={t('common.signOut')}
-                aria-label={t('common.signOut')}
-                className="flex items-center gap-1 rounded-xl border-[3px] border-cave bg-card px-2 py-1.5 text-xs font-semibold text-card-foreground shadow-[var(--shadow-stone)] transition hover:bg-secondary active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{t('common.signOutLabel')}</span>
-              </button>
+              <UserMenu email={userEmail} onSignOut={handleSignOut} signingOut={signingOut} />
             )}
           </div>
         </div>

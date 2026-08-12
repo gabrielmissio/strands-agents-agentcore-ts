@@ -10,7 +10,7 @@ export function LanguageSwitcher() {
   const { locale, setLocale, t } = useI18n()
 
   return (
-    <label className="flex items-center gap-1 rounded-xl border-[3px] border-cave bg-card px-2 py-1.5 text-cave shadow-[var(--shadow-stone)]">
+    <label className="flex h-9 items-center gap-1 rounded-xl border-[3px] border-cave bg-card px-2 text-cave shadow-[var(--shadow-stone)]">
       <Languages className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       <span className="sr-only">{t('common.language')}</span>
       <select

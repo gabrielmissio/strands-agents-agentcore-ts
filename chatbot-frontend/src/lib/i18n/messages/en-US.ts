@@ -14,6 +14,8 @@ export const enUS = {
   'common.signOut': 'Sign out',
   'common.signOutLabel': 'Sign Out',
   'common.language': 'Language',
+  'common.connectedAs': 'Connected as',
+  'common.userMenu': 'User menu',
 
   // ── Auth ────────────────────────────────────────────────────────────
   'auth.signInTitle': '🦴 Sign In',

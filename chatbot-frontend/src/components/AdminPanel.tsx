@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, LogOut, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react'
+import { ArrowLeft, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react'
+import { UserMenu } from './UserMenu.tsx'
 import { ApiError, inviteUser, listUsers, type AdminUser } from '@/lib/admin-api.ts'
 import {
   LOCALE_LABELS,
@@ -121,7 +122,7 @@ export function AdminPanel({ userEmail, onSignOut, onBack }: AdminPanelProps) {
             type="button"
             onClick={onBack}
             aria-label={t('admin.backToChat')}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border-[3px] border-cave bg-card text-cave shadow-[var(--shadow-stone)] transition hover:bg-secondary active:translate-y-0.5 active:shadow-none"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border-[3px] border-cave bg-card text-cave shadow-[var(--shadow-stone)] transition hover:bg-secondary active:translate-y-0.5 active:shadow-none"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
@@ -134,23 +135,7 @@ export function AdminPanel({ userEmail, onSignOut, onBack }: AdminPanelProps) {
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <LanguageSwitcher />
-            {userEmail && (
-              <span
-                className="hidden max-w-[14rem] truncate text-xs font-semibold text-muted-foreground sm:block"
-                title={userEmail}
-              >
-                {userEmail}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => void onSignOut()}
-              aria-label={t('common.signOut')}
-              className="flex items-center gap-1.5 rounded-2xl border-[3px] border-cave bg-card px-3 py-2 font-display text-xs uppercase text-cave shadow-[var(--shadow-stone)] transition hover:bg-secondary active:translate-y-0.5 active:shadow-none"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">{t('common.signOutLabel')}</span>
-            </button>
+            <UserMenu email={userEmail} onSignOut={onSignOut} />
           </div>
         </div>
       </header>
