@@ -1,0 +1,38 @@
+name: CI
+
+# Runs the same checks `npm run verify` (+ `npm run audit`) already run locally before opening a PR
+# — see the root README's "Root scripts" table for what each one does and why `audit` gates on
+# `critical` rather than `high`. Nothing here needs AWS credentials or Docker: the infra test suite
+# deliberately excludes AgentStack (it builds a real container image at synth time) from its
+# synth-based assertions for exactly that reason, and this workflow inherits the same boundary — a
+# full `cdk synth`/`cdk deploy` is a separate, credentialed concern, not a PR gate.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            agent/package-lock.json
+            chatbot-bff/package-lock.json
+            chatbot-frontend/package-lock.json
+            infra/package-lock.json
+
+      - name: Install dependencies (root + every subpackage)
+        run: npm run bootstrap
+
+      - name: Lint, typecheck, test
+        run: npm run verify
+
+      - name: Audit
+        run: npm run audit

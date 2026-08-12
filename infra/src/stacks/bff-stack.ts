@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib'
 import * as cognito from 'aws-cdk-lib/aws-cognito'
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
 import * as iam from 'aws-cdk-lib/aws-iam'
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as logs from 'aws-cdk-lib/aws-logs'
@@ -11,7 +12,7 @@ import * as sns from 'aws-cdk-lib/aws-sns'
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions'
 import { Construct } from 'constructs'
 import { ADMIN_GROUP_NAME } from './auth-stack.js'
-import type { ApiThrottle } from '../config.js'
+import { DEFAULT_USER_RATE_LIMIT, type ApiThrottle, type UserRateLimit } from '../config.js'
 
 export interface BffStackProps extends cdk.StackProps {
   projectName: string
@@ -24,6 +25,11 @@ export interface BffStackProps extends cdk.StackProps {
    * header the Lambdas set. Defaults to `*` (see `resolveAllowedOrigin` in `config.ts` for why).
    */
   allowedOrigin?: string
+  /**
+   * Caps how often one signed-in caller can hit `/chat`, independent of `throttle` above (which
+   * caps the whole account). Defaults to `DEFAULT_USER_RATE_LIMIT`.
+   */
+  userRateLimit?: UserRateLimit
   /** Subscribed to alarms and to the budget. The alarms exist either way. */
   alertEmail?: string
   /** Monthly USD ceiling that triggers a budget notification. Omitted disables the budget. */
@@ -43,9 +49,23 @@ export class BffStack extends cdk.Stack {
       agentRuntimeArn,
       throttle,
       allowedOrigin = '*',
+      userRateLimit = DEFAULT_USER_RATE_LIMIT,
       alertEmail,
       monthlyBudgetUsd,
     } = props
+
+    // ── Per-caller rate limit table ─────────────────────────────────────
+    // Holds one item per (caller, time window) — see chatbot-bff/src/rate-limit.ts for the
+    // check-and-increment logic. Pure operational counters, not user data: on-demand billing (this
+    // is bursty, low-volume traffic, not worth provisioning capacity for) and always destroyable,
+    // regardless of RETAIN_DATA — losing it just means every caller's quota resets.
+    const rateLimitTable = new dynamodb.Table(this, 'RateLimitTable', {
+      tableName: `${projectName}-bff-rate-limit`,
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'expiresAt',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    })
 
     // ── Lambda function ────────────────────────────────────────────────
     const fn = new lambda.Function(this, 'ChatFunction', {
@@ -63,6 +83,9 @@ export class BffStack extends cdk.Stack {
         ALLOWED_ORIGIN: allowedOrigin,
         AGENT_RUNTIME_ARN: agentRuntimeArn,
         COGNITO_USER_POOL_ID: userPool.userPoolId,
+        RATE_LIMIT_TABLE_NAME: rateLimitTable.tableName,
+        USER_RATE_LIMIT: String(userRateLimit.limit),
+        USER_RATE_LIMIT_WINDOW_SECONDS: String(userRateLimit.windowSeconds),
       },
       logGroup: new logs.LogGroup(this, 'ChatFunctionLogs', {
         logGroupName: `/aws/lambda/${projectName}-bff`,
@@ -78,6 +101,15 @@ export class BffStack extends cdk.Stack {
         effect: iam.Effect.ALLOW,
         actions: ['bedrock-agentcore:InvokeAgentRuntime'],
         resources: [agentRuntimeArn, `${agentRuntimeArn}/runtime-endpoint/*`],
+      }),
+    )
+
+    // ── IAM: rate-limit table — UpdateItem only, that's the only operation checkRateLimit needs ──
+    fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['dynamodb:UpdateItem'],
+        resources: [rateLimitTable.tableArn],
       }),
     )
 

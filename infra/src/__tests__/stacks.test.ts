@@ -235,6 +235,58 @@ describe('BffStack — allowedOrigin', () => {
   })
 })
 
+describe('BffStack — per-caller rate limit', () => {
+  it('wires the default limit into the chat function and scopes IAM to UpdateItem only', () => {
+    const { template } = synthBff()
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'dist/handler.handler',
+      Environment: {
+        Variables: Match.objectLike({
+          USER_RATE_LIMIT: '20',
+          USER_RATE_LIMIT_WINDOW_SECONDS: '60',
+        }),
+      },
+    })
+
+    template.hasResourceProperties('AWS::DynamoDB::Table', {
+      TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
+    })
+
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({ Action: 'dynamodb:UpdateItem' }),
+        ]),
+      },
+    })
+  })
+
+  it('propagates a configured limit to the chat function', () => {
+    const app = new cdk.App()
+    const auth = new AuthStack(app, 'TestAuth', { projectName: 'test', env })
+    const stack = new BffStack(app, 'TestBff', {
+      projectName: 'test',
+      userPool: auth.userPool,
+      agentRuntimeArn: FAKE_RUNTIME_ARN,
+      throttle: { rateLimit: 10, burstLimit: 20 },
+      userRateLimit: { limit: 5, windowSeconds: 30 },
+      env,
+    })
+    const template = Template.fromStack(stack)
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'dist/handler.handler',
+      Environment: {
+        Variables: Match.objectLike({
+          USER_RATE_LIMIT: '5',
+          USER_RATE_LIMIT_WINDOW_SECONDS: '30',
+        }),
+      },
+    })
+  })
+})
+
 describe('BffStack — budget', () => {
   it('creates no budget when the email or the ceiling is missing', () => {
     expect(Object.keys(synthBff().template.findResources('AWS::Budgets::Budget'))).toHaveLength(0)

@@ -1,11 +1,19 @@
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import type { APIGatewayProxyEvent } from 'aws-lambda'
 import type { Writable } from 'node:stream'
 import { invokeAgentStream } from './agent-client.js'
 import { formatSseEvent, jsonHeaders, sseHeaders, validateMessage } from './http.js'
+import { checkRateLimit, resolveRateLimitConfig } from './rate-limit.js'
 import { resolveSessionId } from './session.js'
 
 const AGENT_RUNTIME_ARN = process.env.AGENT_RUNTIME_ARN ?? ''
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? '*'
+// Unset locally (local.ts has no DynamoDB table to point at) — the rate-limit check below is
+// skipped in that case, same treatment as any other infra-only guardrail that only exists once
+// deployed. The deployed Lambda always has this set (infra/src/stacks/bff-stack.ts).
+const RATE_LIMIT_TABLE_NAME = process.env.RATE_LIMIT_TABLE_NAME ?? ''
+const RATE_LIMIT_CONFIG = resolveRateLimitConfig()
+const dynamoClient = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
 
 function writeSseEvent(responseStream: Writable, event: string, data: unknown) {
   responseStream.write(formatSseEvent(event, data))
@@ -62,6 +70,24 @@ export const handler = awslambda.streamifyResponse(
         writeSseEvent(responseStream, 'done', { ok: false })
         responseStream.end()
         return
+      }
+
+      // Bounds how often *this caller* can invoke the agent — MAX_MESSAGE_LENGTH (see http.ts)
+      // bounds how much each call costs, API_RATE_LIMIT (infra) bounds the whole account. Without
+      // this layer, one authenticated client looping calls only hits the account-wide ceiling,
+      // which every other caller shares.
+      if (RATE_LIMIT_TABLE_NAME) {
+        const rateLimit = await checkRateLimit(dynamoClient, RATE_LIMIT_TABLE_NAME, userId, RATE_LIMIT_CONFIG)
+
+        if (!rateLimit.allowed) {
+          writeSseEvent(responseStream, 'error', {
+            error: 'Too many requests, try again shortly.',
+            retryAfterSeconds: rateLimit.retryAfterSeconds,
+          })
+          writeSseEvent(responseStream, 'done', { ok: false })
+          responseStream.end()
+          return
+        }
       }
 
       const parsedBody: RequestBody = JSON.parse(event.body ?? '{}')

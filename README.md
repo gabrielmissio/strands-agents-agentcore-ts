@@ -143,12 +143,15 @@ The root package provides a small set of convenience commands for common workflo
 | `npm run typecheck`          | Run `tsc --noEmit` in every subpackage                                |
 | `npm run test`               | Run the test suite in every subpackage (vitest)                       |
 | `npm run verify`             | `lint` + `typecheck` + `test` — what to run before opening a PR      |
+| `npm run audit`              | `npm audit --audit-level=critical` in the root package and each subpackage — see the note below |
 | `npm run synth`              | Build deployable artifacts and synthesize the CDK app                |
 | `npm run deploy`             | Deploy all infrastructure                                            |
 | `npm run destroy`            | Destroy all deployed stacks                                          |
 | `npm run docker:setup-arm64` | Enable local ARM64 Docker emulation for agent image builds           |
 
 `npm run install:all:fix` only makes semver-compatible changes, but in `infra/` that still isn't risk-free: `npm audit fix` can bump `aws-cdk-lib` within its declared range (`^2.250.0`) to a version whose cloud-assembly schema is newer than the pinned `aws-cdk` CLI (`aws-cdk-lib`'s own devDependency, `^2.1118.3`) can read — `cdk synth` then fails with a schema-version mismatch, even though nothing in `infra/package.json` changed. Run `npm run synth` after using this script and, if it fails that way, either bump `aws-cdk` to the version the error message names or revert `infra/package-lock.json`.
+
+`npm run audit` gates on `critical` rather than `high`: at the time of writing, `infra/`'s tree carries an unfixable *high* finding (`brace-expansion`, bundled *inside* `aws-cdk-lib` itself — `npm audit fix` says so explicitly, and it only clears once `aws-cdk-lib` ships a patched release) and `agent/`, `chatbot-bff/` and `infra/` all carry a *low*, Windows-only, dev-server-only finding nested under `vitest`/`tsup`/`tsx`'s shared `esbuild`. Neither reaches a deployed artifact — both are dev-tooling-only — and neither is fixable from this repo's own `package.json`. Gating on `critical` keeps CI green against real regressions without being permanently red over two findings nobody here can act on; re-run `npm audit` (no `--audit-level`) periodically to see whether either has a fix yet.
 
 ## Testing
 
