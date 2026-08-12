@@ -7,6 +7,8 @@
     "install:all": "npm install --ignore-scripts && npm --prefix ./agent install && npm --prefix ./chatbot-bff install && npm --prefix ./chatbot-frontend install && npm --prefix ./infra install",
     "install:all:fix": "npm run install:all && (npm audit fix || true) && (npm --prefix ./agent audit fix || true) && (npm --prefix ./chatbot-bff audit fix || true) && (npm --prefix ./chatbot-frontend audit fix || true) && (npm --prefix ./infra audit fix || true)",
     "typecheck": "npm --prefix ./agent run typecheck && npm --prefix ./chatbot-bff run typecheck && npm --prefix ./infra run typecheck && npm --prefix ./chatbot-frontend run typecheck",
+    "test": "npm --prefix ./agent run test && npm --prefix ./chatbot-bff run test && npm --prefix ./infra run test && npm --prefix ./chatbot-frontend run test",
+    "verify": "npm run lint && npm run typecheck && npm run test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "synth": "npm --prefix ./infra run synth",

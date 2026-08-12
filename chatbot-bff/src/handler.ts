@@ -1,25 +1,14 @@
 import type { APIGatewayProxyEvent } from 'aws-lambda'
 import type { Writable } from 'node:stream'
 import { invokeAgentStream } from './agent-client.js'
-import { jsonHeaders, sseHeaders } from './http.js'
+import { formatSseEvent, jsonHeaders, sseHeaders, validateMessage } from './http.js'
 import { resolveSessionId } from './session.js'
 
 const AGENT_RUNTIME_ARN = process.env.AGENT_RUNTIME_ARN ?? ''
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? '*'
 
-function writeSseEvent(
-  responseStream: Writable,
-  event: string,
-  data: unknown,
-) {
-  const payload =
-    typeof data === 'string' ? data : JSON.stringify(data)
-
-  responseStream.write(`event: ${event}\n`)
-  for (const line of payload.split('\n')) {
-    responseStream.write(`data: ${line}\n`)
-  }
-  responseStream.write('\n')
+function writeSseEvent(responseStream: Writable, event: string, data: unknown) {
+  responseStream.write(formatSseEvent(event, data))
 }
 
 type RequestBody = {
@@ -76,16 +65,16 @@ export const handler = awslambda.streamifyResponse(
       }
 
       const parsedBody: RequestBody = JSON.parse(event.body ?? '{}')
-      const message = parsedBody.message
+      const validated = validateMessage(parsedBody.message)
 
-      if (!message || typeof message !== 'string') {
-        writeSseEvent(responseStream, 'error', {
-          error: 'Missing "message" field',
-        })
+      if (!validated.ok) {
+        writeSseEvent(responseStream, 'error', { error: validated.error })
         writeSseEvent(responseStream, 'done', { ok: false })
         responseStream.end()
         return
       }
+
+      const message = validated.message
 
       // Only a session id minted for this caller is honored — see session.ts. A session id is a
       // bearer token for AgentCore conversation history; without this, one signed-in user could read

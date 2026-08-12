@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aws-amplify/auth": "^6.19.1",
@@ -24,6 +26,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.1.10"
   }
 }

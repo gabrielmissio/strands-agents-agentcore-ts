@@ -6,7 +6,7 @@ This repository is a strong demo/reference implementation for Strands Agents + T
 
 The main gap is not core functionality. The agent, frontend, BFF, and CDK stacks demonstrate the intended architecture well. The gap is production hardening across security, delivery, operability, testing, and documentation consistency.
 
-A hardening pass since this assessment was first written closed several of the gaps below: a real over-broad IAM grant, a year-long CloudFront cache bug, a cross-user agent-conversation leak, an unbound BFF session id, destructive infra defaults, and undocumented/placeholder module READMEs. It also added an invite-only auth mode and an admin panel for user management. The sections below are marked accordingly — CI/CD, automated tests, permissive CORS, and secret handling remain open.
+A hardening pass since this assessment was first written closed several of the gaps below: a real over-broad IAM grant, a year-long CloudFront cache bug, a cross-user agent-conversation leak, an unbound BFF session id, destructive infra defaults, undocumented/placeholder module READMEs, and the absence of any test coverage. It also added an invite-only auth mode, an admin panel for user management, and English/Portuguese i18n. The sections below are marked accordingly — CI/CD, permissive CORS, and secret handling remain open.
 
 ## Overall verdict
 
@@ -59,23 +59,24 @@ Recommendation:
 
 ### 3. No test coverage for critical paths
 
-Impact: high
+Impact: high → largely addressed
 
-Why it matters:
+Evidence (current):
 
-- The repository demonstrates streaming behavior, auth setup, environment-driven mode switching, and AWS integrations
-- These are all regression-prone areas that benefit from executable coverage
+- All four packages run vitest (`npm test` at the root fans out to each) — see [Testing](README.md#testing) in the root README for exactly what's covered
+- The frontend stream parser, the BFF's session binding and AgentCore stream normalization, `infra/src/config.ts`'s env resolvers, and CDK-synthesized-template assertions for the security properties this template has regressed on before (scoped IAM, Cognito schema, cache-control split, Lambda timeouts) are all covered
+- `infra/src/config.ts` and `chatbot-bff/src/http.ts` exist specifically so this logic is testable without synthesizing/deploying or hitting AWS
 
-Evidence:
+Remaining:
 
-- No test or spec files are present in the workspace
-- Critical components such as the stream parser, BFF handler, config resolution, and CDK synthesis behavior have no visible automated coverage
+- No tests for rendered React components (`AuthScreen`, `ChatExperience`, `AdminPanel`) — needs `@testing-library/react` + `jsdom`, a scoped follow-up
+- `AgentStack` (the Docker-image-building stack) has no synthesized-template assertions, since exercising it would trigger a real `docker build` on every test run
+- Still no CI to run any of this automatically — see gap #2
 
 Recommendation:
 
-- Add unit tests for the frontend stream parser and config resolution
-- Add unit/integration tests for the BFF handler and AgentCore stream handling
-- Add snapshot or assertion-based CDK tests for major infrastructure invariants
+- Add component tests once the jsdom/testing-library dependency is worth taking on
+- Wire `npm run verify` (or at least `npm test`) into CI once gap #2 is addressed
 
 ### 4. Security posture is demo-grade, not production-grade
 
@@ -230,7 +231,7 @@ Recommendation:
 
 - ~~Align all README files with the current auth and integration behavior~~ — done
 - Add CI for install, lint, typecheck, build, and CDK synth
-- Add tests for the stream parser, BFF handler, and config mode selection
+- ~~Add tests for the stream parser, BFF handler, and config mode selection~~ — done (`npm test` at the root; see [Testing](README.md#testing)) — CI to run it automatically is still open
 - Pin runtime-critical dependencies
 
 ### Phase 2: security and operations

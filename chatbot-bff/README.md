@@ -26,6 +26,7 @@ The local server listens on `http://localhost:3001/chat` and re-streams AgentCor
 | `npm run build` | Build the Lambda bundle |
 | `npm run dev` | Start the local streaming proxy |
 | `npm run typecheck` | Run TypeScript type checking |
+| `npm run test` | Run the test suite (vitest) |
 
 ## Environment variables
 

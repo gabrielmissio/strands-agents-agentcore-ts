@@ -37,6 +37,7 @@ The local runtime listens on `http://localhost:8080` and exposes:
 | `npm run mcp:http` | Start the local HTTP MCP server |
 | `npm run invoke:bedrock` | Invoke a deployed AgentCore runtime |
 | `npm run typecheck` | Run TypeScript type checking |
+| `npm run test` | Run the test suite (vitest) |
 
 ## Environment variables
 

@@ -40,3 +40,40 @@ export function jsonHeaders(
     'Access-Control-Allow-Headers': CORS_HEADERS,
   }
 }
+
+/**
+ * Serializes one SSE event. Multi-line payloads get one `data:` line each, per the SSE spec — a raw
+ * newline inside a single `data:` line would end the event early.
+ */
+export function formatSseEvent(event: string, data: unknown): string {
+  const payload = typeof data === 'string' ? data : JSON.stringify(data)
+  const lines = payload.split('\n').map((line) => `data: ${line}\n`)
+
+  return `event: ${event}\n${lines.join('')}\n`
+}
+
+/**
+ * Ceiling on a single prompt, in characters.
+ *
+ * Rate limiting (see infra's `API_RATE_LIMIT`) caps how *often* the agent is called; this caps how
+ * *much* each call costs. Without it, one authenticated client pasting a large document in a loop
+ * runs up unbounded Bedrock spend with no other guardrail catching it. Generous enough for a long
+ * question, small enough that abuse is bounded — raise it deliberately, not by accident.
+ */
+export const MAX_MESSAGE_LENGTH = 8000
+
+/** Whether a prompt is present, a non-blank string, and within the cost ceiling. */
+export function validateMessage(
+  message: unknown,
+  maxLength: number = MAX_MESSAGE_LENGTH,
+): { ok: true; message: string } | { ok: false; error: string } {
+  if (typeof message !== 'string' || !message.trim()) {
+    return { ok: false, error: 'Missing "message" field' }
+  }
+
+  if (message.length > maxLength) {
+    return { ok: false, error: `"message" exceeds ${maxLength} characters` }
+  }
+
+  return { ok: true, message }
+}

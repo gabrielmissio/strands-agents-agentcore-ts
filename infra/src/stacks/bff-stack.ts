@@ -11,12 +11,7 @@ import * as sns from 'aws-cdk-lib/aws-sns'
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions'
 import { Construct } from 'constructs'
 import { ADMIN_GROUP_NAME } from './auth-stack.js'
-
-/** Requests/second allowed on the API stage, and the burst above it. */
-export interface ApiThrottle {
-  rateLimit: number
-  burstLimit: number
-}
+import type { ApiThrottle } from '../config.js'
 
 export interface BffStackProps extends cdk.StackProps {
   projectName: string
@@ -154,7 +149,12 @@ export class BffStack extends cdk.Stack {
       }),
       handler: 'dist/admin-handler.handler',
       runtime: lambda.Runtime.NODEJS_22_X,
-      timeout: cdk.Duration.seconds(30),
+      // Matched to the API Gateway REST integration ceiling, which is a hard 29 seconds for a
+      // buffered (non-streaming) response like this one's. A longer Lambda timeout isn't extra
+      // headroom — it's a function that keeps running and billing after the gateway has already
+      // returned 504 to a client that's gone. The chat function stays at 60s: it streams
+      // (`ResponseTransferMode.STREAM`), so it isn't held to the same buffered-integration cap.
+      timeout: cdk.Duration.seconds(29),
       memorySize: 256,
       architecture: lambda.Architecture.X86_64,
       environment: {

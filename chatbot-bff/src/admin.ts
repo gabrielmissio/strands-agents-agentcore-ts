@@ -225,7 +225,7 @@ export function auditRecord(
   action: string,
   actor: Actor | undefined,
   outcome: AuditRecord['outcome'],
-  extra: { target?: string; detail?: Record<string, unknown> } = {},
+  extra: { target?: string; detail?: Record<string, unknown>; at?: () => Date } = {},
 ): AuditRecord {
   return {
     type: 'audit',
@@ -237,6 +237,6 @@ export function auditRecord(
     ...(extra.target ? { target: extra.target } : {}),
     ...(extra.detail ? { detail: extra.detail } : {}),
     outcome,
-    at: new Date().toISOString(),
+    at: (extra.at?.() ?? new Date()).toISOString(),
   }
 }

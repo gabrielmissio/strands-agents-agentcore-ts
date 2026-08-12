@@ -21,6 +21,7 @@ cp .env.example .env
 | `npm run deploy:bff` | Build the BFF and deploy only the BFF stack |
 | `npm run destroy` | Destroy all stacks |
 | `npm run typecheck` | Run `tsc --noEmit` |
+| `npm run test` | Build `chatbot-bff`/`chatbot-frontend`, then run the test suite (vitest) |
 | `npm run docker:setup-arm64` | Enable local ARM64 emulation for Docker |
 
 ## Stacks

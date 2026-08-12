@@ -20,6 +20,7 @@ npm run dev
 | `npm run build` | Type-check and build the production bundle |
 | `npm run preview` | Preview the built bundle locally |
 | `npm run typecheck` | Run `tsc --noEmit` on its own, without building |
+| `npm run test` | Run the test suite (vitest) |
 
 ## Runtime modes
 

@@ -26,7 +26,7 @@ async function* readWebStream(
   }
 }
 
-function toAsyncIterable(stream: unknown): AsyncIterable<Uint8Array> {
+export function toAsyncIterable(stream: unknown): AsyncIterable<Uint8Array> {
   // In Node/Lambda the AWS SDK may return an async-iterable SdkStream instead of
   // a browser-style ReadableStream, so callers must not assume getReader() exists.
   if (
