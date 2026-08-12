@@ -35,7 +35,7 @@ Use [chatbot-bff/.env.example](.env.example) as the source of truth.
 | Variable | Required | Purpose |
 |---|---|---|
 | `AWS_REGION` | No | AWS region for the AgentCore client |
-| `ALLOWED_ORIGIN` | No | Allowed browser origin for CORS |
+| `ALLOWED_ORIGIN` | No | Allowed browser origin for CORS. Only read here for local dev (`local.ts`); in the deployed path it's set on both Lambdas by `infra/src/stacks/bff-stack.ts` from the infra-level `ALLOWED_ORIGIN` — see [infra/README.md](../infra/README.md#guardrails) |
 | `AGENT_RUNTIME_ARN` | Yes | Target Bedrock AgentCore runtime ARN |
 
 Two more, `COGNITO_USER_POOL_ID` and `ADMIN_GROUP_NAME`, are set on the deployed admin Lambda by `infra/src/stacks/bff-stack.ts` — they are not part of `.env.example` because the local dev server (`local.ts`) only exercises `/chat`, never the admin routes. See [Admin routes](#admin-routes) below.

@@ -19,6 +19,11 @@ export interface BffStackProps extends cdk.StackProps {
   agentRuntimeArn: string
   /** Caps requests/second on the API stage. Every request that gets through costs Bedrock tokens. */
   throttle: ApiThrottle
+  /**
+   * Browser origin allowed to call this API — both on the CORS preflight and on every response
+   * header the Lambdas set. Defaults to `*` (see `resolveAllowedOrigin` in `config.ts` for why).
+   */
+  allowedOrigin?: string
   /** Subscribed to alarms and to the budget. The alarms exist either way. */
   alertEmail?: string
   /** Monthly USD ceiling that triggers a budget notification. Omitted disables the budget. */
@@ -32,7 +37,15 @@ export class BffStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: BffStackProps) {
     super(scope, id, props)
 
-    const { projectName, userPool, agentRuntimeArn, throttle, alertEmail, monthlyBudgetUsd } = props
+    const {
+      projectName,
+      userPool,
+      agentRuntimeArn,
+      throttle,
+      allowedOrigin = '*',
+      alertEmail,
+      monthlyBudgetUsd,
+    } = props
 
     // ── Lambda function ────────────────────────────────────────────────
     const fn = new lambda.Function(this, 'ChatFunction', {
@@ -47,7 +60,7 @@ export class BffStack extends cdk.Stack {
       memorySize: 512,
       architecture: lambda.Architecture.X86_64,
       environment: {
-        ALLOWED_ORIGIN: '*',
+        ALLOWED_ORIGIN: allowedOrigin,
         AGENT_RUNTIME_ARN: agentRuntimeArn,
         COGNITO_USER_POOL_ID: userPool.userPoolId,
       },
@@ -104,7 +117,10 @@ export class BffStack extends cdk.Stack {
         ),
       },
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        // Mirrors ALLOWED_ORIGIN on the Lambdas above — a specific origin here without a matching
+        // env var (or vice versa) would pass preflight but fail on the actual response, or the
+        // reverse. Both read from the same `allowedOrigin` prop so they can't drift.
+        allowOrigins: allowedOrigin === '*' ? apigateway.Cors.ALL_ORIGINS : [allowedOrigin],
         // GET is here for the admin user listing; the chat route is POST only.
         allowMethods: ['GET', 'POST', 'OPTIONS'],
         allowHeaders: ['Content-Type', 'Authorization'],
@@ -158,7 +174,7 @@ export class BffStack extends cdk.Stack {
       memorySize: 256,
       architecture: lambda.Architecture.X86_64,
       environment: {
-        ALLOWED_ORIGIN: '*',
+        ALLOWED_ORIGIN: allowedOrigin,
         COGNITO_USER_POOL_ID: userPool.userPoolId,
         ADMIN_GROUP_NAME,
       },

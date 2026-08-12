@@ -140,6 +140,19 @@ export function resolveApiThrottle(rate?: string, burst?: string): ApiThrottle {
   }
 }
 
+/**
+ * Browser origin allowed to call the BFF, echoed on the CORS preflight and every response.
+ *
+ * Defaults to `*` — the same low-friction default as `PUBLIC_SIGNUP_ENABLED` — because the
+ * frontend's own CloudFront URL isn't known at the BFF stack's synth time on a first
+ * `cdk deploy --all` (`FrontendStack` depends on `BffStack`, not the other way around). Set this
+ * once the app's real origin is known: a custom domain, or the CloudFront URL from a prior deploy.
+ */
+export function resolveAllowedOrigin(input?: string): string {
+  const trimmed = input?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : '*'
+}
+
 export function resolveAgentImagePlatform(input?: string): ecrassets.Platform | undefined {
   const normalized = input?.trim().toLowerCase()
 

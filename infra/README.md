@@ -49,6 +49,7 @@ Use [infra/.env.example](.env.example) as the source of truth.
 | `ALERT_EMAIL` | No | Subscribed to the CloudWatch alarms and the budget notification |
 | `MONTHLY_BUDGET_USD` | No | Monthly spend ceiling that triggers a budget notification at 80%/100%. Requires `ALERT_EMAIL` |
 | `API_RATE_LIMIT` / `API_BURST_LIMIT` | No | Requests/second (and burst above it) allowed on the API stage. Default `10` / `20` |
+| `ALLOWED_ORIGIN` | No | Browser origin allowed to call the BFF (CORS). Default `*` — see [Guardrails](#guardrails) |
 
 Additional runtime environment variables for the agent can also be passed through this package, including model and tool configuration.
 
@@ -119,6 +120,7 @@ Four small settings, all opt-in, whose failure mode is silent until it is expens
 - **`ALERT_EMAIL`** — subscribes an address to an SNS topic that three CloudWatch alarms publish to: chat Lambda errors, admin Lambda errors, and API Gateway 5XX. The alarms exist regardless of whether this is set; without it, nobody is notified when they fire.
 - **`MONTHLY_BUDGET_USD`** (needs `ALERT_EMAIL`) — an AWS Budget that notifies at 80% and 100% of the ceiling. A budget alerts; it cannot stop spend. It exists so a runaway loop is noticed in hours rather than on the invoice.
 - **`API_RATE_LIMIT`** / **`API_BURST_LIMIT`** (default `10` / `20`) — throttling on the API Gateway stage. Left unset, the stage inherits the account default of 10,000 requests/second, which is not a limit so much as an invitation — every request that gets through costs Bedrock tokens.
+- **`ALLOWED_ORIGIN`** (default `*`) — the browser origin the BFF's CORS preflight and response headers allow. Both `chatbot-bff/src/handler.ts` and `admin-handler.ts` already read `ALLOWED_ORIGIN` from their Lambda environment and reflect it correctly (`resolveOrigin` in `chatbot-bff/src/http.ts`); this setting is what actually gets that value into the deployed Lambdas and into the API Gateway CORS config, instead of the two silently hardcoding `*`. Defaults open for the same reason `PUBLIC_SIGNUP_ENABLED` does: on a first `cdk deploy --all` the frontend's CloudFront URL doesn't exist yet, so there is no real origin to lock this to in advance. Set it once you know the app's real origin and redeploy the `-bff` stack.
 
 API Gateway access logs (identity and outcome — method, path, status, latency, caller `sub` — never the request body) are always on, in `/aws/apigateway/<project>-chat-api`, independent of `ALERT_EMAIL`.
 

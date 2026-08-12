@@ -12,6 +12,7 @@ import {
   resolveAgentAuthMode,
   resolveAgentImagePlatform,
   resolveAlertEmail,
+  resolveAllowedOrigin,
   resolveApiThrottle,
   resolveFrontendAgentMode,
   resolveMonthlyBudgetUsd,
@@ -48,6 +49,7 @@ const retainData = resolveRetainData(process.env.RETAIN_DATA)
 const alertEmail = resolveAlertEmail(process.env.ALERT_EMAIL)
 const monthlyBudgetUsd = resolveMonthlyBudgetUsd(process.env.MONTHLY_BUDGET_USD)
 const throttle = resolveApiThrottle(process.env.API_RATE_LIMIT, process.env.API_BURST_LIMIT)
+const allowedOrigin = resolveAllowedOrigin(process.env.ALLOWED_ORIGIN)
 
 const appUrl = process.env.APP_URL?.trim() || undefined
 
@@ -87,6 +89,7 @@ const bffStack = new BffStack(app, `${projectName}-bff`, {
   userPool: authStack.userPool,
   agentRuntimeArn: agentStack.runtimeArn,
   throttle,
+  allowedOrigin,
   alertEmail,
   monthlyBudgetUsd,
   env,

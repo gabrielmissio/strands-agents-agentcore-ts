@@ -124,7 +124,9 @@ describe('AuthStack — retainData', () => {
   })
 })
 
-function synthBff(overrides: { alertEmail?: string; monthlyBudgetUsd?: number } = {}) {
+function synthBff(
+  overrides: { alertEmail?: string; monthlyBudgetUsd?: number; allowedOrigin?: string } = {},
+) {
   const app = new cdk.App()
   const auth = new AuthStack(app, 'TestAuth', { projectName: 'test', env })
   const stack = new BffStack(app, 'TestBff', {
@@ -185,6 +187,54 @@ describe('BffStack — admin IAM scope', () => {
   })
 })
 
+describe('BffStack — allowedOrigin', () => {
+  // Regression: both Lambdas' ALLOWED_ORIGIN env var and the API Gateway CORS config used to hardcode
+  // '*' unconditionally, ignoring this prop entirely — see the note in bff-stack.ts.
+  it('defaults both Lambdas and the CORS preflight to the wildcard', () => {
+    const { template } = synthBff()
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'dist/handler.handler',
+      Environment: { Variables: Match.objectLike({ ALLOWED_ORIGIN: '*' }) },
+    })
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'dist/admin-handler.handler',
+      Environment: { Variables: Match.objectLike({ ALLOWED_ORIGIN: '*' }) },
+    })
+  })
+
+  it('propagates a configured origin to both Lambdas and locks the CORS preflight to it', () => {
+    const { template } = synthBff({ allowedOrigin: 'https://app.example.com' })
+
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'dist/handler.handler',
+      Environment: {
+        Variables: Match.objectLike({ ALLOWED_ORIGIN: 'https://app.example.com' }),
+      },
+    })
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Handler: 'dist/admin-handler.handler',
+      Environment: {
+        Variables: Match.objectLike({ ALLOWED_ORIGIN: 'https://app.example.com' }),
+      },
+    })
+
+    // The OPTIONS mock integration response is where CDK's CORS helper renders the allowed origin.
+    template.hasResourceProperties('AWS::ApiGateway::Method', {
+      HttpMethod: 'OPTIONS',
+      Integration: Match.objectLike({
+        IntegrationResponses: Match.arrayWith([
+          Match.objectLike({
+            ResponseParameters: Match.objectLike({
+              'method.response.header.Access-Control-Allow-Origin': "'https://app.example.com'",
+            }),
+          }),
+        ]),
+      }),
+    })
+  })
+})
+
 describe('BffStack — budget', () => {
   it('creates no budget when the email or the ceiling is missing', () => {
     expect(Object.keys(synthBff().template.findResources('AWS::Budgets::Budget'))).toHaveLength(0)
@@ -206,34 +256,38 @@ describe('BffStack — budget', () => {
   })
 })
 
+function synthFrontend() {
+  const app = new cdk.App()
+  const auth = new AuthStack(app, 'TestAuth', { projectName: 'test', env })
+  const bff = new BffStack(app, 'TestBff', {
+    projectName: 'test',
+    userPool: auth.userPool,
+    agentRuntimeArn: FAKE_RUNTIME_ARN,
+    throttle: { rateLimit: 10, burstLimit: 20 },
+    env,
+  })
+  const frontend = new FrontendStack(app, 'TestFrontend', {
+    projectName: 'test',
+    bffUrl: bff.apiUrl,
+    agentMode: 'bff',
+    cognitoUserPoolId: auth.userPool.userPoolId,
+    cognitoUserPoolClientId: auth.userPoolClient.userPoolClientId,
+    cognitoIdentityPoolId: auth.identityPool.ref,
+    cognitoRegion: env.region,
+    agentRuntimeArn: FAKE_RUNTIME_ARN,
+    publicSignUpEnabled: true,
+    env,
+  })
+  return { stack: frontend, template: Template.fromStack(frontend) }
+}
+
 describe('FrontendStack — cache-control split', () => {
   // Regression: a single BucketDeployment stamped `immutable, max-age=31536000` on every object it
   // uploaded, index.html included. index.html is what names the content-hashed bundle files, so a
   // browser told to cache it for a year without revalidating goes on requesting bundle names from a
   // build that no longer exists.
   it('caches hashed assets forever but never the entrypoint', () => {
-    const app = new cdk.App()
-    const auth = new AuthStack(app, 'TestAuth', { projectName: 'test', env })
-    const bff = new BffStack(app, 'TestBff', {
-      projectName: 'test',
-      userPool: auth.userPool,
-      agentRuntimeArn: FAKE_RUNTIME_ARN,
-      throttle: { rateLimit: 10, burstLimit: 20 },
-      env,
-    })
-    const frontend = new FrontendStack(app, 'TestFrontend', {
-      projectName: 'test',
-      bffUrl: bff.apiUrl,
-      agentMode: 'bff',
-      cognitoUserPoolId: auth.userPool.userPoolId,
-      cognitoUserPoolClientId: auth.userPoolClient.userPoolClientId,
-      cognitoIdentityPoolId: auth.identityPool.ref,
-      cognitoRegion: env.region,
-      agentRuntimeArn: FAKE_RUNTIME_ARN,
-      publicSignUpEnabled: true,
-      env,
-    })
-    const template = Template.fromStack(frontend)
+    const { template } = synthFrontend()
 
     const deployments = Object.values(
       template.findResources('Custom::CDKBucketDeployment'),
@@ -246,5 +300,36 @@ describe('FrontendStack — cache-control split', () => {
     expect(cacheControls).toEqual(
       ['no-cache, must-revalidate', 'public, max-age=31536000, immutable'].sort(),
     )
+  })
+})
+
+describe('FrontendStack — security response headers', () => {
+  // Mitigating control for the SPA keeping Cognito tokens in localStorage (see the note in
+  // frontend-stack.ts): a strict script-src is what stops an injected <script> from ever running
+  // long enough to read them.
+  it('sends a CSP that blocks inline/injected scripts, and attaches it to the distribution', () => {
+    const { template } = synthFrontend()
+
+    const policies = template.findResources('AWS::CloudFront::ResponseHeadersPolicy', {
+      Properties: {
+        ResponseHeadersPolicyConfig: Match.objectLike({
+          SecurityHeadersConfig: Match.objectLike({
+            ContentSecurityPolicy: Match.objectLike({
+              ContentSecurityPolicy: Match.stringLikeRegexp("script-src 'self'"),
+            }),
+          }),
+        }),
+      },
+    })
+    const policyIds = Object.keys(policies)
+    expect(policyIds).toHaveLength(1)
+
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        DefaultCacheBehavior: Match.objectLike({
+          ResponseHeadersPolicyId: { Ref: policyIds[0] },
+        }),
+      }),
+    })
   })
 })

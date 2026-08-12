@@ -78,6 +78,60 @@ export class FrontendStack extends cdk.Stack {
       signing: cloudfront.Signing.SIGV4_NO_OVERRIDE,
     })
 
+    // ── Security response headers ───────────────────────────────────────
+    // A meaningful mitigating control given the SPA keeps its Cognito tokens in localStorage
+    // (aws-amplify's default `KeyValueStorage`, configured in chatbot-frontend/src/lib/auth.ts):
+    // moving to httpOnly cookies would need the tokens to be brokered server-side, which is a
+    // bigger redesign than this pass; a strict CSP instead closes the injection point a script
+    // would need in the first place. `script-src 'self'` with no `'unsafe-inline'`/`'unsafe-eval'`
+    // blocks exactly the class of attack (an injected/inline `<script>`) that would otherwise be
+    // able to read `localStorage` and exfiltrate a token.
+    //
+    // `style-src` needs `'unsafe-inline'`: several components set React inline `style={{...}}`
+    // (e.g. ThinkingBubble.tsx, AuthScreen.tsx), which CSP treats as a `style` attribute subject to
+    // the same policy as a `<style>` tag. `connect-src` allows the API Gateway/Cognito/AgentCore
+    // hosts every agent mode can call — a wildcard on `execute-api` rather than the BFF's exact
+    // origin because that origin is a cross-stack CDK token here, not a plain string to splice into
+    // a header value; both hosts are AWS-owned regardless of which mode this deployment uses.
+    const securityHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, 'SecurityHeaders', {
+      responseHeadersPolicyName: `${projectName}-security-headers`,
+      comment: 'CSP + standard hardening headers for the chatbot SPA',
+      securityHeadersBehavior: {
+        contentSecurityPolicy: {
+          contentSecurityPolicy: [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src 'self' https://fonts.gstatic.com",
+            "img-src 'self' data:",
+            [
+              "connect-src 'self'",
+              `https://*.execute-api.${cognitoRegion}.amazonaws.com`,
+              `https://cognito-idp.${cognitoRegion}.amazonaws.com`,
+              `https://cognito-identity.${cognitoRegion}.amazonaws.com`,
+              `https://bedrock-agentcore.${cognitoRegion}.amazonaws.com`,
+            ].join(' '),
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+            "object-src 'none'",
+          ].join('; '),
+          override: true,
+        },
+        strictTransportSecurity: {
+          accessControlMaxAge: cdk.Duration.days(365),
+          includeSubdomains: true,
+          preload: true,
+          override: true,
+        },
+        contentTypeOptions: { override: true },
+        frameOptions: { frameOption: cloudfront.HeadersFrameOption.DENY, override: true },
+        referrerPolicy: {
+          referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+          override: true,
+        },
+      },
+    })
+
     // ── CloudFront distribution ────────────────────────────────────────
     const distribution = new cloudfront.Distribution(this, 'Distribution', {
       comment: `${projectName} frontend`,
@@ -89,6 +143,7 @@ export class FrontendStack extends cdk.Stack {
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+        responseHeadersPolicy: securityHeadersPolicy,
         compress: true,
       },
       // SPA fallback — return index.html for all 403/404 so React Router works

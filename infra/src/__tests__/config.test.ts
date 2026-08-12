@@ -7,6 +7,7 @@ import {
   resolveAgentAuthMode,
   resolveAgentImagePlatform,
   resolveAlertEmail,
+  resolveAllowedOrigin,
   resolveApiThrottle,
   resolveFrontendAgentMode,
   resolveMonthlyBudgetUsd,
@@ -155,6 +156,18 @@ describe('resolveMonthlyBudgetUsd', () => {
     expect(() => resolveMonthlyBudgetUsd('0')).toThrow(/MONTHLY_BUDGET_USD/)
     expect(() => resolveMonthlyBudgetUsd('-5')).toThrow(/MONTHLY_BUDGET_USD/)
     expect(() => resolveMonthlyBudgetUsd('lots')).toThrow(/MONTHLY_BUDGET_USD/)
+  })
+})
+
+describe('resolveAllowedOrigin', () => {
+  it('defaults to the wildcard — the frontend origin does not exist yet on a first deploy', () => {
+    expect(resolveAllowedOrigin(undefined)).toBe('*')
+    expect(resolveAllowedOrigin('')).toBe('*')
+    expect(resolveAllowedOrigin('   ')).toBe('*')
+  })
+
+  it('passes a configured origin through, trimmed', () => {
+    expect(resolveAllowedOrigin(' https://app.example.com ')).toBe('https://app.example.com')
   })
 })
 
