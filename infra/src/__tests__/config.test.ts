@@ -13,6 +13,8 @@ import {
   resolveMonthlyBudgetUsd,
   resolvePublicSignUpEnabled,
   resolveRetainData,
+  resolveUserRateLimit,
+  DEFAULT_USER_RATE_LIMIT,
 } from '../config.js'
 
 describe('resolveAgentAuthMode', () => {
@@ -168,6 +170,24 @@ describe('resolveAllowedOrigin', () => {
 
   it('passes a configured origin through, trimmed', () => {
     expect(resolveAllowedOrigin(' https://app.example.com ')).toBe('https://app.example.com')
+  })
+})
+
+describe('resolveUserRateLimit', () => {
+  it('falls back to the defaults', () => {
+    expect(resolveUserRateLimit(undefined, undefined)).toEqual(DEFAULT_USER_RATE_LIMIT)
+  })
+
+  it('overrides either side independently', () => {
+    expect(resolveUserRateLimit('5', undefined)).toEqual({
+      limit: 5,
+      windowSeconds: DEFAULT_USER_RATE_LIMIT.windowSeconds,
+    })
+  })
+
+  it('rejects a non-positive limit — an unbounded caller is the thing being prevented', () => {
+    expect(() => resolveUserRateLimit('0', undefined)).toThrow(/USER_RATE_LIMIT/)
+    expect(() => resolveUserRateLimit(undefined, 'none')).toThrow(/USER_RATE_LIMIT_WINDOW_SECONDS/)
   })
 })
 

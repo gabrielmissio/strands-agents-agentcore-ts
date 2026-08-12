@@ -50,6 +50,7 @@ Use [infra/.env.example](.env.example) as the source of truth.
 | `MONTHLY_BUDGET_USD` | No | Monthly spend ceiling that triggers a budget notification at 80%/100%. Requires `ALERT_EMAIL` |
 | `API_RATE_LIMIT` / `API_BURST_LIMIT` | No | Requests/second (and burst above it) allowed on the API stage. Default `10` / `20` |
 | `ALLOWED_ORIGIN` | No | Browser origin allowed to call the BFF (CORS). Default `*` — see [Guardrails](#guardrails) |
+| `USER_RATE_LIMIT` / `USER_RATE_LIMIT_WINDOW_SECONDS` | No | Requests one signed-in caller gets per window (seconds). Default `20` / `60` — see [Guardrails](#guardrails) |
 
 Additional runtime environment variables for the agent can also be passed through this package, including model and tool configuration.
 
@@ -121,6 +122,7 @@ Four small settings, all opt-in, whose failure mode is silent until it is expens
 - **`MONTHLY_BUDGET_USD`** (needs `ALERT_EMAIL`) — an AWS Budget that notifies at 80% and 100% of the ceiling. A budget alerts; it cannot stop spend. It exists so a runaway loop is noticed in hours rather than on the invoice.
 - **`API_RATE_LIMIT`** / **`API_BURST_LIMIT`** (default `10` / `20`) — throttling on the API Gateway stage. Left unset, the stage inherits the account default of 10,000 requests/second, which is not a limit so much as an invitation — every request that gets through costs Bedrock tokens.
 - **`ALLOWED_ORIGIN`** (default `*`) — the browser origin the BFF's CORS preflight and response headers allow. Both `chatbot-bff/src/handler.ts` and `admin-handler.ts` already read `ALLOWED_ORIGIN` from their Lambda environment and reflect it correctly (`resolveOrigin` in `chatbot-bff/src/http.ts`); this setting is what actually gets that value into the deployed Lambdas and into the API Gateway CORS config, instead of the two silently hardcoding `*`. Defaults open for the same reason `PUBLIC_SIGNUP_ENABLED` does: on a first `cdk deploy --all` the frontend's CloudFront URL doesn't exist yet, so there is no real origin to lock this to in advance. Set it once you know the app's real origin and redeploy the `-bff` stack.
+- **`USER_RATE_LIMIT`** / **`USER_RATE_LIMIT_WINDOW_SECONDS`** (default `20` / `60`) — how many `/chat` calls one signed-in caller gets per window. `API_RATE_LIMIT` above bounds the whole account's request rate; it does nothing to stop a single caller from consuming all of it, since API Gateway has no per-JWT-claim throttling primitive. This is enforced instead by the chat Lambda itself, against a small on-demand DynamoDB table (`BffStack`'s `RateLimitTable`, one item per caller per window, `dynamodb:UpdateItem` only — see `chatbot-bff/src/rate-limit.ts`) that always exists and is always destroyable: it holds nothing but disposable counters, never user data.
 
 API Gateway access logs (identity and outcome — method, path, status, latency, caller `sub` — never the request body) are always on, in `/aws/apigateway/<project>-chat-api`, independent of `ALERT_EMAIL`.
 

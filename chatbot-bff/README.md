@@ -40,12 +40,15 @@ Use [chatbot-bff/.env.example](.env.example) as the source of truth.
 
 Two more, `COGNITO_USER_POOL_ID` and `ADMIN_GROUP_NAME`, are set on the deployed admin Lambda by `infra/src/stacks/bff-stack.ts` — they are not part of `.env.example` because the local dev server (`local.ts`) only exercises `/chat`, never the admin routes. See [Admin routes](#admin-routes) below.
 
+Three more — `RATE_LIMIT_TABLE_NAME`, `USER_RATE_LIMIT`, `USER_RATE_LIMIT_WINDOW_SECONDS` — are also set on the deployed chat Lambda by `bff-stack.ts`, not part of `.env.example` for the same reason: `local.ts` has no DynamoDB table to point at, so the rate-limit check in `handler.ts` is skipped whenever `RATE_LIMIT_TABLE_NAME` is unset. See [Behavior notes](#behavior-notes) below.
+
 ## Behavior notes
 
 - The BFF invokes AgentCore with SigV4 using AWS credentials available to the process or Lambda function
 - In the deployed path, the `/chat` endpoint is protected by Cognito at API Gateway
 - The local development server is intended to exercise the streaming proxy behavior; it does not perform Cognito token validation itself
 - Every AgentCore session id is namespaced to the authenticated caller's Cognito `sub` (see `resolveSessionId`/`sessionNamespace` in [`src/session.ts`](src/session.ts)). A client-supplied id is only reused if it carries *that caller's* namespace; otherwise a fresh one is minted silently. Without this, a session id — effectively a bearer token for AgentCore conversation history — could be replayed by any other authenticated user
+- `/chat` also caps how often *one caller* can invoke the agent (see `checkRateLimit` in [`src/rate-limit.ts`](src/rate-limit.ts)): a fixed-window quota, keyed by the caller's `sub`, backed by the DynamoDB table `bff-stack.ts` provisions. `API_RATE_LIMIT` (infra) bounds the whole account; this bounds one caller within it, so a single compromised or careless account can't consume every other caller's share. Exceeding it returns an `error` SSE event with a `retryAfterSeconds` hint rather than a hard failure — the caller can retry once the window rolls over
 
 ## Admin routes
 

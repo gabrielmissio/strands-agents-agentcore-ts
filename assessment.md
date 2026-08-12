@@ -1,6 +1,6 @@
 # Assessment — strands-agents-agentcore-ts como template/bootstrapper
 
-**Data:** 2026-08-11 (achados) · **atualizado em 2026-08-12** (remediação P0)
+**Data:** 2026-08-11 (achados) · **atualizado em 2026-08-12** (remediação P0, depois P1 #7–#8)
 **Branch avaliada:** `feat/base-template-v2` (HEAD `165ab0d`)
 **Metodologia:** leitura integral do código-fonte dos quatro pacotes (`agent/`, `chatbot-bff/`, `chatbot-frontend/`, `infra/`), dos stacks CDK, de todos os `README.md`, `.env.example` e testes; execução de `npm audit` em cada pacote. Este documento substitui integralmente a versão anterior de `assessment.md` — foi produzido do zero, sem reaproveitar suas conclusões.
 
@@ -27,13 +27,26 @@ O restante do documento abaixo é o assessment original; os itens corrigidos per
 
 ---
 
+## Atualização — 2026-08-12: P1, itens 7 e 8 (o P1 é grande, sendo feito em etapas)
+
+Dois itens do P1 foram implementados e validados (`npm run verify` + `npm run audit` limpos, 154 testes nos quatro pacotes):
+
+| # | Achado | Status | O que mudou |
+|---|---|---|---|
+| 7 | Sem pipeline de CI | ✅ Corrigido | `.github/workflows/ci.yml` — checkout, Node 22, `npm run bootstrap`, `npm run verify`, `npm run audit`, em push para `main` e em todo PR. Novo script raiz `npm run audit` (`npm audit --audit-level=critical` no root + nos quatro pacotes) — documentado no README raiz junto com o porquê de `critical` e não `high`: a árvore de `infra/` carrega um achado *high* em `brace-expansion`, empacotado **dentro do próprio** `aws-cdk-lib` (`npm audit fix` confirma: só se resolve com um release novo do `aws-cdk-lib`, não é algo que este repo controle), e `agent/`, `chatbot-bff/` e `infra/` carregam um achado *low*, só-Windows, só-dev-server, dentro de `esbuild` (dependência compartilhada de `vitest`/`tsup`/`tsx`). Nenhum dos dois chega a um artefato implantado e nenhum é corrigível a partir deste repo hoje — investigado com `npm audit fix --dry-run` antes de decidir o nível do gate, não assumido |
+| 8 | Sem rate limit por usuário/sessão | ✅ Corrigido | Quota de janela fixa por chamador (`sub` do Cognito) no endpoint `/chat`: tabela DynamoDB on-demand (`BffStack`'s `RateLimitTable`, um item por `(chamador, janela)`, TTL automático), incrementada com `UpdateItem` condicional — atômico entre invocações concorrentes, sem race de leitura-depois-escrita. Lógica pura e testável em `chatbot-bff/src/rate-limit.ts` (`checkRateLimit`/`resolveRateLimitConfig`), integrada em `handler.ts` logo após resolver o `sub` autenticado. IAM da função de chat escopado a `dynamodb:UpdateItem` só nessa tabela — nenhuma permissão a mais. Configurável via `USER_RATE_LIMIT`/`USER_RATE_LIMIT_WINDOW_SECONDS` em `infra/.env` (default 20/60s), independente do `API_RATE_LIMIT` existente (que limita a conta inteira, não um chamador). `local.ts` (dev local) não tem tabela para apontar — o check é pulado quando `RATE_LIMIT_TABLE_NAME` está ausente, mesmo tratamento dado a outros guardrails só-de-infra |
+
+O restante do P1 (armazenamento de token, correlation ID/observabilidade, cobertura de teste dos entry points, telemetria de erro no frontend, MFA) continua pendente — ver [Recomendações priorizadas](#recomendações-priorizadas).
+
+---
+
 ## Veredito executivo
 
 | Caso de uso | Prontidão | Justificativa |
 |---|---|---|
 | **Demo / prova de conceito** | ✅ Pronto | Arquitetura clara, dois padrões de integração bem documentados, deploy de ponta a ponta funcional (`npm run deploy`), guardrails opcionais já pensados (throttle, budget, alarmes). |
-| **Novo projeto agêntico interno (não sensível)** | ✅ Pronto | Boa base para copiar/adaptar. Os três gaps mais silenciosos para esse caso de uso — container root, CORS aberto sem alternativa, deps em `latest` — foram corrigidos em 2026-08-12. Ainda sem CI (P1) e sem MFA (P1), mas nenhum dos dois bloqueia esse caso de uso específico. |
-| **Piloto em produção com dados sensíveis** | ❌ Ainda não pronto | O README raiz já sinaliza corretamente ("not a production-ready template"). Quatro dos seis itens do P0 foram corrigidos em 2026-08-12 (ver [Atualização](#atualização--2026-08-12-remediação-do-p0)); os dois restantes ficam fora de escopo por decisão deliberada, não por descuido. Os bloqueadores que restam são P1 — ver [Recomendações priorizadas](#recomendações-priorizadas). |
+| **Novo projeto agêntico interno (não sensível)** | ✅ Pronto | Boa base para copiar/adaptar. Os três gaps mais silenciosos para esse caso de uso — container root, CORS aberto sem alternativa, deps em `latest` — foram corrigidos em 2026-08-12, e agora há CI cobrindo qualquer fork a partir daqui. Ainda sem MFA (P1), mas isso não bloqueia esse caso de uso específico. |
+| **Piloto em produção com dados sensíveis** | ❌ Ainda não pronto | O README raiz já sinaliza corretamente ("not a production-ready template"). Quatro dos seis itens do P0, e dois itens do P1 (CI, rate limit por usuário), foram corrigidos em 2026-08-12 (ver as duas seções de [Atualização](#atualização--2026-08-12-remediação-do-p0) acima); dois itens do P0 ficam fora de escopo por decisão deliberada, não por descuido. Os bloqueadores que restam são o resto do P1 — ver [Recomendações priorizadas](#recomendações-priorizadas). |
 
 O repositório é **honesto sobre seu próprio estágio** — isso é um ponto forte raro em templates de referência, e a engenharia por trás das partes que *foram* endurecidas (escopo de IAM do `authenticatedRole`, namespacing de sessão por `sub`, dupla função Lambda para separar admin de chat, guardrails de custo) é de qualidade notavelmente acima da média para um "reference repo". O problema não é falta de cuidado — é que o cuidado foi aplicado de forma desigual: partes do sistema (Cognito, IAM do runtime, sessão) receberam tratamento de produção; outras (chave de carteira EVM, container root, CORS, telemetria) ainda estão em modo demo, e nada no runtime as distingue.
 
@@ -52,7 +65,7 @@ O repositório é **honesto sobre seu próprio estágio** — isso é um ponto f
 | 7 | 🟠 High | Dependências AWS/Strands SDK fixadas em `"latest"` em dois pacotes | agent/ + chatbot-bff/ | ✅ Corrigido |
 | 8 | 🟠 High | Processos MCP stdio compartilhados são ponto único de falha e gargalo de concorrência | agent/ | P1 |
 | 9 | 🟡 Medium | Sem CSP/security headers no CloudFront nem no `index.html` | chatbot-frontend/ + infra/ | ✅ Corrigido |
-| 10 | 🟡 Medium | Sem rate limit por usuário/sessão — só throttle global da API Gateway | chatbot-bff/ | P1 |
+| 10 | 🟡 Medium | Sem rate limit por usuário/sessão — só throttle global da API Gateway | chatbot-bff/ | ✅ Corrigido |
 | 11 | 🟡 Medium | Superfície de prompt injection indireta sem mitigação (JSON externo cru volta ao contexto do modelo) | agent/ | P1 |
 | 12 | 🟡 Medium | Servidor HTTP MCP sem autenticação, só allowlist de `Host` | agent/ | P1 |
 | 13 | 🟡 Medium | Erro de RPC não tratado pode vazar API key embutida na `EVM_RPC_URL` | agent/ | P1 |
@@ -61,7 +74,7 @@ O repositório é **honesto sobre seu próprio estágio** — isso é um ponto f
 | 16 | 🟡 Medium | Sem MFA configurado no Cognito (suportado, não habilitado) | infra/ | P1 |
 | 17 | 🟡 Medium | Logging não estruturado (`console.log`/`console.error`), sem correlation ID ponta a ponta | agent/ + chatbot-bff/ | P1 |
 | 18 | 🟡 Medium | Sem telemetria de erro no frontend — incidentes de cliente são invisíveis para operação | chatbot-frontend/ | P1 |
-| 19 | 🟡 Medium | Sem pipeline de CI — `npm run verify` existe mas não é executado automaticamente | repo/ | P1 |
+| 19 | 🟡 Medium | Sem pipeline de CI — `npm run verify` existe mas não é executado automaticamente | repo/ | ✅ Corrigido |
 | 20 | 🟡 Medium | Testes ausentes nos pontos de entrada Lambda (`handler.ts`, `admin-handler.ts`) e no núcleo do agente (`agent.ts`, `index.ts`, MCP servers) | chatbot-bff/ + agent/ | P1 |
 | 21 | 🟢 Low | `ALLOWED_ORIGIN` documentado como controle de produção, mas ignorado pela infra | chatbot-bff/ | ✅ Corrigido (junto do #2) |
 | 22 | 🟢 Low | `VITE_COGNITO_REGION` documentado e nunca lido pelo código | chatbot-frontend/ | P2 |
@@ -143,7 +156,7 @@ Fixadas nas versões hoje resolvidas: `@aws-sdk/client-bedrock-agentcore` → `^
 | Streaming de resposta bem implementado | Positivo | `handler.ts` usa `awslambda.streamifyResponse` corretamente pareado com `ResponseTransferMode.STREAM` na integração do API Gateway (`bff-stack.ts:131`); timeouts bem calibrados (60s para chat que streama, 29s para admin, alinhado ao teto de 29s do API Gateway REST buffered). |
 | Clientes AWS SDK reaproveitados entre invocações | Positivo | `BedrockAgentCoreClient` e `CognitoIdentityProviderClient` instanciados em escopo de módulo — padrão correto para evitar overhead de reconexão em cada cold start. |
 | Design "um `Agent` por request, `BedrockModel` compartilhado" | Positivo | `agent.ts:36-64` evita vazamento de estado de conversa entre requisições concorrentes, sem pagar o custo de recriar o client Bedrock a cada chamada — trade-off correto e documentado. |
-| Rate limiting só a nível de conta, não por usuário | Média (já contada) | Ver seção de segurança — o único freio é o throttle global da stage; sem quota por `sub`. |
+| Rate limiting só a nível de conta, não por usuário → ✅ Corrigido em 2026-08-12 | Média (já contada) | Quota por `sub`, backed by DynamoDB, no endpoint `/chat` — ver [Atualização — P1](#atualização--2026-08-12-p1-itens-7-e-8-o-p1-é-grande-sendo-feito-em-etapas). |
 
 No geral, a arquitetura serverless (Lambda + AgentCore Runtime gerenciado + CloudFront/S3) escala horizontalmente por padrão — não há estado de servidor a gerenciar. O gargalo real de escalabilidade é o *design de tooling* do agente (processos MCP stdio compartilhados e sem timeout), não a infraestrutura em si.
 
@@ -179,7 +192,7 @@ Resumo: a telemetria de **infraestrutura** (alarmes, orçamento, access log de b
 - `npm audit` limpo (0 vulnerabilidades) em `agent/`, `chatbot-bff/` e `chatbot-frontend/`.
 
 **Gaps:**
-- **Sem pipeline de CI.** Não há `.github/workflows` nem qualquer outro CI configurado. `npm run verify` (lint + typecheck + test) existe como script, mas nada o executa automaticamente em PR — depende inteiramente de disciplina manual de quem contribui. Para um template que se propõe a acelerar entrega de vários projetos, isso é uma lacuna estrutural: cada fork herda a ausência de CI, não só o código.
+- **Sem pipeline de CI. → ✅ Corrigido em 2026-08-12** (`.github/workflows/ci.yml` — ver [Atualização — P1](#atualização--2026-08-12-p1-itens-7-e-8-o-p1-é-grande-sendo-feito-em-etapas)). Descrição original do achado, mantida como histórico: não havia `.github/workflows` nem qualquer outro CI configurado. `npm run verify` (lint + typecheck + test) existia como script, mas nada o executava automaticamente em PR — dependia inteiramente de disciplina manual de quem contribui.
 - **Testes concentrados na lógica mais fácil de isolar, não na superfície de maior risco:**
   - Em `chatbot-bff`, `handler.ts` e `admin-handler.ts` — os pontos de entrada Lambda reais, onde a checagem de claims/autorização de fato acontece — não têm teste direto. As funções puras que eles chamam (`isAdminClaims`, `resolveSessionId`) são bem testadas isoladamente, mas nada garante que o handler continua *chamando* essas funções corretamente após um refactor futuro.
   - Em `agent/`, não há teste para `agent.ts` (wiring de tools/MCP), `index.ts` (a superfície HTTP real, streaming, tratamento de erro) nem para nenhum dos três MCP servers — exatamente as partes com mais interação externa e mais tratamento de erro.
@@ -219,8 +232,8 @@ Conclusão sobre documentação: coerente na maior parte, com gaps pequenos e f�
 6. ~~Fixar `agent/package.json` e `chatbot-bff/package.json` em versões semver reais.~~ **✅ Feito em 2026-08-12.**
 
 ### P1 — antes de adoção mais ampla por outros times
-7. Configurar CI (lint + typecheck + test + `npm audit` em PR) — o script `verify` já existe, falta só o gatilho.
-8. Adicionar rate limit por usuário/sessão no BFF (não só o throttle global de API Gateway).
+7. ~~Configurar CI (lint + typecheck + test + `npm audit` em PR).~~ **✅ Feito em 2026-08-12.**
+8. ~~Adicionar rate limit por usuário/sessão no BFF.~~ **✅ Feito em 2026-08-12.**
 9. Decidir e implementar o design de armazenamento de tokens do Cognito fora de `localStorage` (ex.: cookie `httpOnly` brokerado pelo BFF) — a CSP adicionada em P0 mitiga, não substitui essa mudança.
 10. Instrumentar correlation ID ponta a ponta (frontend → BFF → agente → MCP), e decidir conscientemente se X-Ray/OpenTelemetry entra ou se as permissões de X-Ray já concedidas devem ser removidas.
 11. Cobrir com teste os pontos de entrada reais (`handler.ts`, `admin-handler.ts`, `agent.ts`, `index.ts`) — hoje o teste está concentrado na lógica pura ao redor deles, não neles.

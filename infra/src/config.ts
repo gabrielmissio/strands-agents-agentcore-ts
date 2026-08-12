@@ -153,6 +153,39 @@ export function resolveAllowedOrigin(input?: string): string {
   return trimmed && trimmed.length > 0 ? trimmed : '*'
 }
 
+/** Requests a single caller gets per window, and the window length in seconds. */
+export interface UserRateLimit {
+  limit: number
+  windowSeconds: number
+}
+
+export const DEFAULT_USER_RATE_LIMIT: UserRateLimit = { limit: 20, windowSeconds: 60 }
+
+/**
+ * Caps how often *one signed-in caller* can invoke the agent — independent of `API_RATE_LIMIT`
+ * (`resolveApiThrottle` above), which caps the whole account's request rate and doesn't stop a
+ * single caller from consuming all of it. Enforced by the chat Lambda against a DynamoDB table (see
+ * `BffStack`), not by API Gateway — there's no per-JWT-claim throttling primitive there to lean on.
+ */
+export function resolveUserRateLimit(limitInput?: string, windowInput?: string): UserRateLimit {
+  const parse = (input: string | undefined, fallback: number, name: string) => {
+    const trimmed = input?.trim()
+    if (!trimmed) return fallback
+
+    const value = Number(trimmed)
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`${name} must be a positive number: ${input}`)
+    }
+
+    return value
+  }
+
+  return {
+    limit: parse(limitInput, DEFAULT_USER_RATE_LIMIT.limit, 'USER_RATE_LIMIT'),
+    windowSeconds: parse(windowInput, DEFAULT_USER_RATE_LIMIT.windowSeconds, 'USER_RATE_LIMIT_WINDOW_SECONDS'),
+  }
+}
+
 export function resolveAgentImagePlatform(input?: string): ecrassets.Platform | undefined {
   const normalized = input?.trim().toLowerCase()
 
