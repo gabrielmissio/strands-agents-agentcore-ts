@@ -99,6 +99,17 @@ The link needs the app's URL, which the auth stack cannot get as a synth-time re
 
 **Language.** Both emails go out in whichever language the recipient's `custom:inviteLocale` attribute names (`en-US` or `pt-BR`), falling back to English. That attribute is written at sign-up time by the frontend (the visitor's current UI language) and at invite time by the admin routes (the language the inviting admin picked — see [chatbot-bff/README.md](../chatbot-bff/README.md#admin-routes)). It's declared as a *custom* attribute on the pool (`customAttributes.inviteLocale` in `auth-stack.ts`) because Cognito only allows standard attributes to be added when a pool is created — this is a one-way door, since Cognito cannot delete a custom attribute afterward. It is deliberately not named `locale`: that collides with a reserved standard attribute name, and the resulting schema entry is indistinguishable from declaring the standard one, so `custom:locale` silently never gets created and any write to it fails.
 
+**Why these emails land in spam, and it isn't the HTML.** By default the pool sends through Cognito's built-in mailer, whose `from` is hardcoded to `no-reply@verificationemail.com` — shared across every Cognito pool on the internet that hasn't configured its own sender. There's no SPF/DKIM/DMARC alignment with any domain a recipient's mail provider would recognize, the address has a well-earned reputation from being the default sender for pools that *do* send spam, and Cognito itself caps it at 50 emails/day, which is documentation-by-implication that it's not meant for production traffic. The HTML template already follows the practices that are actually within its control — table layout, inline styles, no images, one link whose visible text is its destination, no hidden text, states why the recipient got it, plain register, a full `<!doctype html>` document rather than a bare fragment — none of that moves a spam-filter decision that's fundamentally about sender identity, not content.
+
+**The real fix is SES.** Configuring `email: cognito.UserPoolEmail.withSES({ fromEmail, fromName, sesVerifiedDomain })` on the `UserPool` in `auth-stack.ts` sends through a verified identity on a domain the recipient's filters can actually check DKIM against. This isn't wired into the stack, on purpose: it needs a domain you control, and the setup has a manual, out-of-band step that no amount of CDK can shortcut —
+
+1. Verify an email address or domain identity in SES (domain is better: it covers every address at it, and is what DKIM alignment needs).
+2. Add the DNS records SES gives you (DKIM CNAMEs, and a domain verification TXT record if verifying the whole domain).
+3. A new SES account starts in the **sandbox**, which only sends to *verified* recipients — unworkable for an invite flow where the whole point is emailing someone who has never touched this AWS account. Request production access from SES (a support-case-driven review, not an API call — the actual long-lead item here).
+4. Once production access is granted, add the `email:` property above and redeploy the auth stack.
+
+Until that's done, expect invite and confirmation emails to be flaky about landing in an inbox — this is a known, documented limitation of Cognito's default sender, not a defect in this template.
+
 ## Guardrails
 
 Four small settings, all opt-in, whose failure mode is silent until it is expensive or irreversible:

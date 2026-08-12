@@ -129,9 +129,23 @@ const CARD = '#ffffff'
 const cell = (content, extra = '') =>
   `<td style="padding:0 32px;font-family:${FONT};font-size:15px;line-height:1.6;color:${INK};background-color:${CARD};${extra}">${content}</td>`
 
-/** The card/table chrome every email shares. */
-function renderShell(rows) {
+/**
+ * The document + table chrome every email shares.
+ *
+ * A full document — `<!doctype html>`, `<html lang>`, a `<head>` with a charset — rather than the
+ * bare `<table>` fragment this used to be. Every mail client re-wraps a fragment into *some*
+ * document before rendering it, but which one is undefined; a client or filter that expects a
+ * well-formed document and gets a naked `<table>` has no obligation to guess charset or language
+ * correctly, and "well-formed" is one more small, free signal against a spam heuristic. `lang`
+ * matters specifically for pt-BR: without it, a screen reader falls back to the recipient's own
+ * device language and can mispronounce the content.
+ */
+function renderShell(rows, locale) {
   return [
+    '<!doctype html>',
+    `<html lang="${resolveLocale(locale)}">`,
+    '<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /></head>',
+    '<body style="margin:0;padding:0;">',
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CANVAS};margin:0;padding:24px 12px;">`,
     '<tr><td align="center">',
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;background-color:${CARD};border:1px solid ${LINE};border-radius:10px;">`,
@@ -139,6 +153,8 @@ function renderShell(rows) {
     '</table>',
     '</td></tr>',
     '</table>',
+    '</body>',
+    '</html>',
   ].join('')
 }
 
@@ -184,7 +200,7 @@ export function renderInviteEmail({ locale, appName, appUrl } = {}) {
     footer(fill(copy.why)),
   ]
 
-  return renderShell(rows)
+  return renderShell(rows, locale)
 }
 
 /** Subject and body for one invite. */
@@ -212,7 +228,7 @@ export function renderVerificationEmail({ locale, appName, appUrl } = {}) {
     footer(fill(copy.why)),
   ]
 
-  return renderShell(rows)
+  return renderShell(rows, locale)
 }
 
 /** Subject and body for one confirmation code. */
