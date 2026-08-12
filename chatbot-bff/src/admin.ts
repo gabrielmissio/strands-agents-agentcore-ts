@@ -5,6 +5,8 @@
  * instead of only being exercised against a deployed function. Nothing here talks to Cognito or to
  * Lambda's event shape.
  */
+import type { ErrorCode } from './errors.js'
+
 /**
  * Group whose members may call these routes. Read from the environment — set to `ADMIN_GROUP_NAME`
  * from `infra/src/stacks/auth-stack.ts` by the BFF stack — with the same literal as a fallback for
@@ -13,11 +15,35 @@
  */
 export const ADMIN_GROUP = process.env.ADMIN_GROUP_NAME ?? 'admins'
 
+/**
+ * Languages an invite email can be written in. Mirrors `SUPPORTED_LOCALES` in the frontend's i18n
+ * core and the catalog in the CustomMessage trigger; the trigger falls back to the base locale, so
+ * a value that slips past this list degrades to English rather than breaking the invite.
+ */
+export const SUPPORTED_LOCALES = ['en-US', 'pt-BR'] as const
+export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
+export const BASE_LOCALE: SupportedLocale = 'en-US'
+
+/**
+ * Where the invite language is stored on the user.
+ *
+ * A *custom* attribute, hence the prefix: Cognito only lets standard attributes be declared when the
+ * pool is created, so a pool that already has users can never gain one. Must match the
+ * `customAttributes` entry in the auth stack.
+ *
+ * Not named `locale`: that collides with a reserved standard attribute, and the resulting schema
+ * entry is indistinguishable from declaring the standard one — so `custom:locale` is never created
+ * and every invite fails. See the note in `auth-stack.ts`.
+ */
+export const LOCALE_ATTRIBUTE = 'custom:inviteLocale'
+
 export type UserRole = 'admin' | 'user'
 
 export interface InviteRequest {
   email: string
   role: UserRole
+  /** Written to the user's locale attribute, which is what the email trigger reads. */
+  locale: SupportedLocale
 }
 
 export interface UserSummary {
@@ -71,7 +97,7 @@ export function isAdminClaims(
 // a useful message instead of surfacing an SDK exception.
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string }
+export type ParseResult<T> = { ok: true; value: T } | { ok: false; code: ErrorCode }
 
 export function parseInviteRequest(raw: unknown): ParseResult<InviteRequest> {
   let body: unknown = raw
@@ -80,27 +106,35 @@ export function parseInviteRequest(raw: unknown): ParseResult<InviteRequest> {
     try {
       body = JSON.parse(raw)
     } catch {
-      return { ok: false, error: 'Body is not valid JSON' }
+      return { ok: false, code: 'invalidBody' }
     }
   }
 
   if (typeof body !== 'object' || body === null) {
-    return { ok: false, error: 'Body must be a JSON object' }
+    return { ok: false, code: 'invalidBody' }
   }
 
-  const { email, role } = body as { email?: unknown; role?: unknown }
+  const { email, role, locale } = body as { email?: unknown; role?: unknown; locale?: unknown }
 
   if (typeof email !== 'string' || !EMAIL_PATTERN.test(email.trim())) {
-    return { ok: false, error: 'A valid "email" is required' }
+    return { ok: false, code: 'invalidEmail' }
   }
 
   if (role !== undefined && role !== 'admin' && role !== 'user') {
-    return { ok: false, error: '"role" must be "admin" or "user"' }
+    return { ok: false, code: 'invalidRole' }
+  }
+
+  if (locale !== undefined && !SUPPORTED_LOCALES.includes(locale as SupportedLocale)) {
+    return { ok: false, code: 'invalidLocale' }
   }
 
   return {
     ok: true,
-    value: { email: email.trim().toLowerCase(), role: (role as UserRole) ?? 'user' },
+    value: {
+      email: email.trim().toLowerCase(),
+      role: (role as UserRole) ?? 'user',
+      locale: (locale as SupportedLocale) ?? BASE_LOCALE,
+    },
   }
 }
 

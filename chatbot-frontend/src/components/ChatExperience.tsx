@@ -3,14 +3,9 @@ import { LogOut, Send, ShieldCheck, Sparkles } from 'lucide-react'
 import cavemanMascot from '@/assets/caveman-mascot.png'
 import { ChatBubble, type ChatMessage } from './ChatBubble.tsx'
 import { ThinkingBubble } from './ThinkingBubble.tsx'
+import { LanguageSwitcher } from './LanguageSwitcher.tsx'
 import { sendMessageBff, sendMessageDirect, AGENT_MODE } from '@/lib/api.ts'
-
-const SUGGESTIONS = [
-  { icon: '🪨', label: 'Validate address', prompt: 'Validate 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0' },
-  { icon: '💰', label: 'Get balance', prompt: "What's the balance of vitalik.eth?" },
-  { icon: '🔥', label: 'Exchange rate', prompt: 'ETH to USD rate?' },
-  { icon: '✨', label: 'Count letters', prompt: 'How many times does the letter "s" appear in "satoshi nakamoto\'s secret"?' },
-]
+import { useI18n } from '@/lib/i18n/context.ts'
 
 export interface ChatExperienceProps {
   /** Shown in the header so it is obvious which account is talking to the agent. */
@@ -28,12 +23,20 @@ export interface ChatExperienceProps {
 }
 
 export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: ChatExperienceProps) {
+  const { t } = useI18n()
+  const SUGGESTIONS = [
+    { icon: '🪨', label: t('chat.suggestionValidateLabel'), prompt: t('chat.suggestionValidatePrompt') },
+    { icon: '💰', label: t('chat.suggestionBalanceLabel'), prompt: t('chat.suggestionBalancePrompt') },
+    { icon: '🔥', label: t('chat.suggestionRateLabel'), prompt: t('chat.suggestionRatePrompt') },
+    { icon: '✨', label: t('chat.suggestionLettersLabel'), prompt: t('chat.suggestionLettersPrompt') },
+  ]
+
   const [signingOut, setSigningOut] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       role: 'agent',
-      content: 'OOK OOK! Me CAVEMAN. Me help with shiny blockchain rocks. Ask me anything!',
+      content: t('chat.welcome'),
     },
   ])
   const [input, setInput] = useState('')
@@ -76,7 +79,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
       // Add placeholder streaming message
       setMessages((m) => [
         ...m,
-        { id: agentMsgId, role: 'agent', content: '', isStreaming: true, status: 'Connecting...', toolsUsed: [] },
+        { id: agentMsgId, role: 'agent', content: '', isStreaming: true, status: t('chat.statusConnecting'), toolsUsed: [] },
       ])
 
       try {
@@ -85,7 +88,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === agentMsgId
-                  ? { ...msg, content: msg.content + token, status: 'Streaming...' }
+                  ? { ...msg, content: msg.content + token, status: t('chat.statusStreaming') }
                   : msg,
               ),
             )
@@ -95,7 +98,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === agentMsgId
-                  ? { ...msg, toolsUsed: [...toolsUsed], activeTool: toolName, status: `Using ${toolName}` }
+                  ? { ...msg, toolsUsed: [...toolsUsed], activeTool: toolName, status: t('chat.statusUsingTool', { tool: toolName }) }
                   : msg,
               ),
             )
@@ -104,7 +107,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === agentMsgId
-                  ? { ...msg, status: 'Thinking...' }
+                  ? { ...msg, status: t('chat.statusThinking') }
                   : msg,
               ),
             )
@@ -131,7 +134,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
                 msg.id === agentMsgId
                   ? {
                       ...msg,
-                      content: msg.content || `UGH! ${error.message}`,
+                      content: msg.content || t('chat.errorWithMessage', { message: error.message }),
                       isStreaming: false,
                       activeTool: undefined,
                       status: undefined,
@@ -145,7 +148,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
         setMessages((m) =>
           m.map((msg) =>
             msg.id === agentMsgId
-              ? { ...msg, content: msg.content || 'UGH! Rock fall on head. Me no can answer right now. Try again!', isStreaming: false, status: undefined }
+              ? { ...msg, content: msg.content || t('chat.errorGeneric'), isStreaming: false, status: undefined }
               : msg,
           ),
         )
@@ -160,7 +163,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
       // Add placeholder streaming message
       setMessages((m) => [
         ...m,
-        { id: agentMsgId, role: 'agent', content: '', isStreaming: true, status: 'Connecting...', toolsUsed: [] },
+        { id: agentMsgId, role: 'agent', content: '', isStreaming: true, status: t('chat.statusConnecting'), toolsUsed: [] },
       ])
 
       try {
@@ -172,7 +175,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === agentMsgId
-                  ? { ...msg, content: msg.content + token, status: 'Streaming...' }
+                  ? { ...msg, content: msg.content + token, status: t('chat.statusStreaming') }
                   : msg,
               ),
             )
@@ -182,7 +185,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === agentMsgId
-                  ? { ...msg, toolsUsed: [...toolsUsed], activeTool: toolName, status: `Using ${toolName}` }
+                  ? { ...msg, toolsUsed: [...toolsUsed], activeTool: toolName, status: t('chat.statusUsingTool', { tool: toolName }) }
                   : msg,
               ),
             )
@@ -191,7 +194,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === agentMsgId
-                  ? { ...msg, status: 'Thinking...' }
+                  ? { ...msg, status: t('chat.statusThinking') }
                   : msg,
               ),
             )
@@ -218,7 +221,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
                 msg.id === agentMsgId
                   ? {
                       ...msg,
-                      content: msg.content || `UGH! ${error.message}`,
+                      content: msg.content || t('chat.errorWithMessage', { message: error.message }),
                       isStreaming: false,
                       activeTool: undefined,
                       status: undefined,
@@ -232,7 +235,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
         setMessages((m) =>
           m.map((msg) =>
             msg.id === agentMsgId
-              ? { ...msg, content: msg.content || 'UGH! Rock fall on head. Me no can answer right now. Try again!', isStreaming: false, status: undefined }
+              ? { ...msg, content: msg.content || t('chat.errorGeneric'), isStreaming: false, status: undefined }
               : msg,
           ),
         )
@@ -248,28 +251,29 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
       <header className="relative z-10 border-b-[3px] border-cave/80 bg-secondary/60 backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-3">
           <div className="relative h-11 w-11 overflow-hidden rounded-full border-[3px] border-cave bg-bone shadow-[var(--shadow-stone)]">
-            <img src={cavemanMascot} alt="Caveman mascot" className="h-full w-full object-cover" />
+            <img src={cavemanMascot} alt={t('chat.mascotHeaderAlt')} className="h-full w-full object-cover" />
             <span className="absolute -right-0.5 -bottom-0.5 h-3 w-3 rounded-full border-2 border-cave bg-moss" />
           </div>
           <div className="leading-tight">
             <h1 className="font-display text-lg uppercase text-cave sm:text-xl">
-              Web3 Caveman
+              {t('chat.title')}
             </h1>
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Powered by Bedrock AgentCore
+              {t('chat.subtitle')}
             </p>
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
+            <LanguageSwitcher />
             {isAdmin && onOpenAdmin && (
               <button
                 type="button"
                 onClick={onOpenAdmin}
-                title="Admin panel"
+                title={t('chat.adminPanelTitle')}
                 className="flex items-center gap-1 rounded-xl border-[3px] border-cave bg-fire px-2 py-1 font-display text-[10px] uppercase tracking-wider text-fire-foreground shadow-[var(--shadow-stone)] transition active:translate-y-0.5 active:shadow-none"
               >
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Admin
+                {t('chat.adminLink')}
               </button>
             )}
             {userEmail && (
@@ -285,12 +289,12 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
                 type="button"
                 onClick={handleSignOut}
                 disabled={signingOut}
-                title="Sign out"
-                aria-label="Sign out"
+                title={t('common.signOut')}
+                aria-label={t('common.signOut')}
                 className="flex items-center gap-1 rounded-xl border-[3px] border-cave bg-card px-2 py-1.5 text-xs font-semibold text-card-foreground shadow-[var(--shadow-stone)] transition hover:bg-secondary active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Sign Out</span>
+                <span className="hidden sm:inline">{t('common.signOutLabel')}</span>
               </button>
             )}
           </div>
@@ -337,7 +341,7 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask caveman about wallet, balance, address…"
+              placeholder={t('chat.inputPlaceholder')}
               className="flex-1 bg-transparent text-sm font-semibold text-cave placeholder:text-cave/50 focus:outline-none sm:text-base"
               autoFocus
             />
@@ -346,13 +350,13 @@ export function ChatExperience({ userEmail, isAdmin, onSignOut, onOpenAdmin }: C
             type="submit"
             disabled={!input.trim() || thinking}
             className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-[3px] border-cave bg-fire text-fire-foreground shadow-[var(--shadow-stone)] transition active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Send"
+            aria-label={t('chat.send')}
           >
             <Send className="h-5 w-5" />
           </button>
         </form>
         <p className="pb-2 text-center text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          🦴 Strands Agents + Amazon Bedrock AgentCore 🦴
+          {t('chat.footer')}
         </p>
       </footer>
     </div>

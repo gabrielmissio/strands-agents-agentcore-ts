@@ -50,6 +50,8 @@ Two more, `COGNITO_USER_POOL_ID` and `ADMIN_GROUP_NAME`, are set on the deployed
 
 A second, separate Lambda (`admin-handler.ts`) serves `GET`/`POST /admin/users`, so that the chat function — the one relaying model output — never holds `cognito-idp:AdminCreate*` permissions. The gateway's Cognito authorizer validates the token; the handler then re-checks the `cognito:groups` claim itself and returns `403` for anyone outside the admin group. Every call — allowed, denied, or errored — emits one structured JSON audit line (see `auditRecord` in `admin.ts`).
 
+`POST /admin/users` accepts an optional `locale` (`en-US` | `pt-BR`, see `SUPPORTED_LOCALES` in `admin.ts`), written to the new user's `custom:inviteLocale` attribute — that's what the Cognito CustomMessage trigger reads to pick the invite email's language (see [infra/README.md](../infra/README.md#emails)). Every error response is `{ code, error }` — `code` is a stable `ErrorCode` (see `errors.ts`) the frontend maps onto a localized string; `error` is the English fallback for a client that never reached one, e.g. a 403 straight from the API Gateway authorizer.
+
 ## Lambda build output
 
 ```bash

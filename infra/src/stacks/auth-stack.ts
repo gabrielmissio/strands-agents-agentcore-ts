@@ -82,6 +82,24 @@ export class AuthStack extends cdk.Stack {
       standardAttributes: {
         email: { required: true, mutable: true },
       },
+      // Set at invite/sign-up time and read by the CustomMessage trigger to pick the email's
+      // language — see `LOCALE_ATTRIBUTE` in `chatbot-bff/src/admin.ts` and `lambdas/custom-message`.
+      //
+      // A *custom* attribute rather than the standard `locale`: standard attributes can only be
+      // declared when the pool is created, so a pool that already has users can never gain one.
+      //
+      // The name must NOT be `locale`. CDK renders a custom attribute as a bare
+      // `{ Name, AttributeDataType }` schema entry with no `custom:` prefix — Cognito is what adds
+      // it — so naming it after a reserved standard attribute produces an entry indistinguishable
+      // from declaring the standard one. Cognito then never creates `custom:locale`, and any write
+      // to it fails at runtime with "Type for attribute {custom:locale} could not be determined".
+      // Surfaces as `custom:inviteLocale` instead.
+      //
+      // Cognito cannot delete a custom attribute once added to a pool's schema — this is a one-way
+      // door, unlike everything else in this stack that's gated behind an env var.
+      customAttributes: {
+        inviteLocale: new cognito.StringAttribute({ mutable: true }),
+      },
       // Plain-text fallbacks for the two emails the CustomMessage trigger below rewrites as
       // designed HTML. They are what goes out if the trigger declines or fails — see the note on
       // `customMessageFn` — so they stay legible rather than duplicating the template in

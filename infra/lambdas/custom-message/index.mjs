@@ -20,6 +20,24 @@
 import { buildInviteMessage, buildVerificationMessage } from './email-template.mjs'
 
 /**
+ * Where the recipient's preferred language lives.
+ *
+ * Must match `LOCALE_ATTRIBUTE` in `chatbot-bff/src/admin.ts` — a *custom* attribute because
+ * Cognito only lets standard attributes be declared when the pool is created, so a pool that
+ * already has users can never gain one. Not named `locale`: that collides with a reserved standard
+ * attribute, and the resulting schema entry is indistinguishable from declaring the standard one —
+ * so `custom:locale` is never actually created and the attribute write fails. See the note in
+ * `auth-stack.ts`.
+ */
+const LOCALE_ATTRIBUTE = 'custom:inviteLocale'
+
+/** Reads the recipient's language off the attributes Cognito hands this trigger. */
+function readLocale(userAttributes) {
+  const value = userAttributes?.[LOCALE_ATTRIBUTE]
+  return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+/**
  * Cached across warm invocations so a busy pool does not re-read SSM per email. Only a resolved,
  * non-empty URL is cached: a miss before the frontend stack has deployed must not be remembered, or
  * the container would keep sending link-less emails long after the parameter exists.
@@ -74,13 +92,14 @@ export const handler = async (event) => {
   try {
     const appUrl = await resolveAppUrl()
     const appName = process.env.APP_NAME
+    const locale = readLocale(event.request?.userAttributes)
 
     if (event?.triggerSource === 'CustomMessage_AdminCreateUser') {
-      const { subject, body } = buildInviteMessage(appName, appUrl)
+      const { subject, body } = buildInviteMessage(locale, appName, appUrl)
       event.response.emailSubject = subject
       event.response.emailMessage = body
     } else if (VERIFICATION_TRIGGERS.has(event?.triggerSource)) {
-      const { subject, body } = buildVerificationMessage(appName, appUrl)
+      const { subject, body } = buildVerificationMessage(locale, appName, appUrl)
       event.response.emailSubject = subject
       event.response.emailMessage = body
     }
