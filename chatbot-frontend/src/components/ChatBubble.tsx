@@ -1,5 +1,6 @@
 import cavemanMascot from '@/assets/caveman-mascot.png'
 import { ToolBadgeList } from './ToolBadge'
+import { useI18n } from '@/lib/i18n/context.ts'
 
 export type ChatMessage = {
   id: string
@@ -22,6 +23,8 @@ export function ChatBubble({
   message: ChatMessage
   isFirstAgent?: boolean
 }) {
+  const { t } = useI18n()
+
   if (message.role === 'user') {
     return (
       <div className="flex animate-bubble-in justify-end">
@@ -45,7 +48,7 @@ export function ChatBubble({
           isFirstAgent ? 'animate-mascot' : ''
         }`}
       >
-        <img src={cavemanMascot} alt="Caveman" className="h-full w-full object-cover" />
+        <img src={cavemanMascot} alt={t('chat.mascotAlt')} className="h-full w-full object-cover" />
       </div>
       <div className="relative max-w-[80%]">
         <div className="bubble-caveman">

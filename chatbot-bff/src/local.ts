@@ -9,20 +9,20 @@
  * Run with: npm run dev
  */
 import { createServer, type ServerResponse } from 'node:http'
-import { randomUUID } from 'node:crypto'
 import { invokeAgentStream } from './agent-client.js'
+import { formatSseEvent, validateMessage } from './http.js'
+import { resolveSessionId } from './session.js'
 
 const PORT = Number(process.env.PORT ?? 3001)
 const AGENT_RUNTIME_ARN = process.env.AGENT_RUNTIME_ARN ?? ''
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN ?? '*'
 
+// There is no API Gateway Cognito authorizer locally, so there is no real caller identity to bind
+// a session to. Fixed on purpose: it still exercises the same namespacing path as the real handler.
+const LOCAL_CALLER_ID = 'local-dev'
+
 function writeSseEvent(res: ServerResponse, event: string, data: unknown) {
-  const payload = typeof data === 'string' ? data : JSON.stringify(data)
-  res.write(`event: ${event}\n`)
-  for (const line of payload.split('\n')) {
-    res.write(`data: ${line}\n`)
-  }
-  res.write('\n')
+  res.write(formatSseEvent(event, data))
 }
 
 const server = createServer(async (req, res) => {
@@ -57,15 +57,15 @@ const server = createServer(async (req, res) => {
   let sessionId: string
   try {
     const body = JSON.parse(rawBody)
-    message = body.message
-    const rawSessionId = body.sessionId
-    sessionId = typeof rawSessionId === 'string' && rawSessionId.length >= 33 ? rawSessionId : randomUUID()
-    if (!message || typeof message !== 'string') {
+    const validated = validateMessage(body.message)
+    if (!validated.ok) {
       for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v)
       res.writeHead(400, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'Missing "message" field' }))
+      res.end(JSON.stringify({ error: validated.error }))
       return
     }
+    message = validated.message
+    sessionId = resolveSessionId(body.sessionId, LOCAL_CALLER_ID)
   } catch {
     for (const [k, v] of Object.entries(corsHeaders)) res.setHeader(k, v)
     res.writeHead(400, { 'Content-Type': 'application/json' })

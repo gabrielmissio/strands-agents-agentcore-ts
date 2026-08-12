@@ -26,3 +26,16 @@ export function configureAuth() {
     },
   })
 }
+
+/**
+ * Whether the auth screen should offer self-service sign-up.
+ *
+ * Mirrors `AuthStackProps.publicSignUpEnabled` in `infra/src/stacks/auth-stack.ts`. When `false`,
+ * the user pool has self sign-up disabled and every account is created by an admin via
+ * `admin-create-user` — the auth screen must offer sign-in only, and route the mandatory
+ * first-login password change through the NEW_PASSWORD_REQUIRED challenge instead of a sign-up form.
+ * Defaults to enabled: absent config should not silently lock visitors out of a demo deployment.
+ */
+export function isPublicSignUpEnabled(): boolean {
+  return readAppConfig('VITE_PUBLIC_SIGNUP_ENABLED') !== 'false'
+}

@@ -3,7 +3,17 @@ import * as s3 from 'aws-cdk-lib/aws-s3'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment'
+import * as ssm from 'aws-cdk-lib/aws-ssm'
 import { Construct } from 'constructs'
+
+/**
+ * Where the app's public URL is published for other stacks to read at runtime (not at synth time —
+ * see the note by `AppUrlParameter` below). A plain string function, not a construct: importing it
+ * elsewhere creates no CDK cross-stack reference, just agreement on a parameter name.
+ */
+export function appUrlParameterName(projectName: string): string {
+  return `/${projectName}/app-url`
+}
 
 export interface FrontendStackProps extends cdk.StackProps {
   projectName: string
@@ -19,6 +29,14 @@ export interface FrontendStackProps extends cdk.StackProps {
   cognitoIdentityPoolId: string
   cognitoRegion: string
   agentRuntimeArn: string
+  /** Mirrors AuthStackProps.publicSignUpEnabled — tells the SPA which auth screen to render. */
+  publicSignUpEnabled: boolean
+  /**
+   * Mirrors AuthStackProps.retainData. The bucket only holds a rebuildable static build, so this is
+   * mostly about not orphaning it on every disposable-environment teardown — unlike the user pool,
+   * losing it costs nothing but a redeploy.
+   */
+  retainData?: boolean
 }
 
 export class FrontendStack extends cdk.Stack {
@@ -36,24 +54,82 @@ export class FrontendStack extends cdk.Stack {
       cognitoIdentityPoolId,
       cognitoRegion,
       agentRuntimeArn,
+      publicSignUpEnabled,
+      retainData = true,
     } = props
 
     // ── S3 bucket (private — no public access) ─────────────────────────
     const siteBucket = new s3.Bucket(this, 'SiteBucket', {
       bucketName: `${projectName}-frontend-${this.account}`,
-      
+
       // NOTE: Current SCP forbids calls to s3:PutBucketPublicAccessBlock.
       // temporarily comment out and leave default configuration behavior (what also blocks public access, but without an explicit block all public access).
       // blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
 
       encryption: s3.BucketEncryption.S3_MANAGED,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: true,
+      removalPolicy: retainData ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      // Only safe alongside DESTROY: emptying a bucket you are about to retain would just leave an
+      // empty one behind, defeating the point.
+      autoDeleteObjects: !retainData,
     })
 
     // ── CloudFront Origin Access Control ──────────────────────────────
     const oac = new cloudfront.S3OriginAccessControl(this, 'OAC', {
       signing: cloudfront.Signing.SIGV4_NO_OVERRIDE,
+    })
+
+    // ── Security response headers ───────────────────────────────────────
+    // A meaningful mitigating control given the SPA keeps its Cognito tokens in localStorage
+    // (aws-amplify's default `KeyValueStorage`, configured in chatbot-frontend/src/lib/auth.ts):
+    // moving to httpOnly cookies would need the tokens to be brokered server-side, which is a
+    // bigger redesign than this pass; a strict CSP instead closes the injection point a script
+    // would need in the first place. `script-src 'self'` with no `'unsafe-inline'`/`'unsafe-eval'`
+    // blocks exactly the class of attack (an injected/inline `<script>`) that would otherwise be
+    // able to read `localStorage` and exfiltrate a token.
+    //
+    // `style-src` needs `'unsafe-inline'`: several components set React inline `style={{...}}`
+    // (e.g. ThinkingBubble.tsx, AuthScreen.tsx), which CSP treats as a `style` attribute subject to
+    // the same policy as a `<style>` tag. `connect-src` allows the API Gateway/Cognito/AgentCore
+    // hosts every agent mode can call — a wildcard on `execute-api` rather than the BFF's exact
+    // origin because that origin is a cross-stack CDK token here, not a plain string to splice into
+    // a header value; both hosts are AWS-owned regardless of which mode this deployment uses.
+    const securityHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, 'SecurityHeaders', {
+      responseHeadersPolicyName: `${projectName}-security-headers`,
+      comment: 'CSP + standard hardening headers for the chatbot SPA',
+      securityHeadersBehavior: {
+        contentSecurityPolicy: {
+          contentSecurityPolicy: [
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src 'self' https://fonts.gstatic.com",
+            "img-src 'self' data:",
+            [
+              "connect-src 'self'",
+              `https://*.execute-api.${cognitoRegion}.amazonaws.com`,
+              `https://cognito-idp.${cognitoRegion}.amazonaws.com`,
+              `https://cognito-identity.${cognitoRegion}.amazonaws.com`,
+              `https://bedrock-agentcore.${cognitoRegion}.amazonaws.com`,
+            ].join(' '),
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+            "object-src 'none'",
+          ].join('; '),
+          override: true,
+        },
+        strictTransportSecurity: {
+          accessControlMaxAge: cdk.Duration.days(365),
+          includeSubdomains: true,
+          preload: true,
+          override: true,
+        },
+        contentTypeOptions: { override: true },
+        frameOptions: { frameOption: cloudfront.HeadersFrameOption.DENY, override: true },
+        referrerPolicy: {
+          referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN,
+          override: true,
+        },
+      },
     })
 
     // ── CloudFront distribution ────────────────────────────────────────
@@ -67,6 +143,7 @@ export class FrontendStack extends cdk.Stack {
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD,
+        responseHeadersPolicy: securityHeadersPolicy,
         compress: true,
       },
       // SPA fallback — return index.html for all 403/404 so React Router works
@@ -102,28 +179,54 @@ export class FrontendStack extends cdk.Stack {
       VITE_COGNITO_USER_POOL_CLIENT_ID: cognitoUserPoolClientId,
       VITE_COGNITO_IDENTITY_POOL_ID: cognitoIdentityPoolId,
       VITE_AGENT_RUNTIME_ARN: agentRuntimeArn,
+      VITE_PUBLIC_SIGNUP_ENABLED: String(publicSignUpEnabled),
     })};`
 
     // ── Deploy pre-built frontend assets ──────────────────────────────
     // Expects `chatbot-frontend` to be built before `cdk deploy` runs.
     // Add `npm run build` in chatbot-frontend/ to your CI pipeline first.
-    new s3deploy.BucketDeployment(this, 'DeployFrontend', {
+    //
+    // Two deployments, because the two kinds of file need opposite cache headers and a single
+    // `BucketDeployment` can only carry one `cacheControl`. Stamping `immutable, max-age=31536000`
+    // on every object — index.html included — is a real bug, not a hypothetical one: index.html is
+    // what names the content-hashed bundle files, so a browser told to keep it for a year without
+    // revalidating goes on requesting the bundle names of a build that no longer exists. Invalidating
+    // the CloudFront distribution does not help, because the stale copy lives in the browser's own
+    // cache — the request that would have hit the invalidated edge is never made.
+    //
+    // `prune: false` on both: two deployments writing to one bucket with pruning on would each
+    // delete the other's files.
+
+    // Content-hashed by Vite, so the filename changes whenever the bytes do. Safe to cache forever;
+    // `immutable` is what stops the browser revalidating them on every reload.
+    const assets = new s3deploy.BucketDeployment(this, 'DeployAssets', {
+      sources: [s3deploy.Source.asset('../chatbot-frontend/dist', { exclude: ['index.html'] })],
+      destinationBucket: siteBucket,
+      memoryLimit: 256,
+      prune: false,
+      cacheControl: [s3deploy.CacheControl.fromString('public, max-age=31536000, immutable')],
+    })
+
+    // The two files whose names never change, and which name everything else. `no-cache` does not
+    // mean "do not store" — it means the browser must revalidate before reusing it, so a deploy is
+    // picked up on the next navigation.
+    const entrypoint = new s3deploy.BucketDeployment(this, 'DeployEntrypoint', {
       sources: [
-        s3deploy.Source.asset('../chatbot-frontend/dist'),
+        s3deploy.Source.asset('../chatbot-frontend/dist', { exclude: ['*', '!index.html'] }),
         s3deploy.Source.data('config.js', configContent),
       ],
       destinationBucket: siteBucket,
       distribution,
-      distributionPaths: ['/*'],
+      // Only these need invalidating — a hashed asset is never stale, it is either present or it is
+      // a new name.
+      distributionPaths: ['/', '/index.html', '/config.js'],
       memoryLimit: 256,
-      // Cache control: aggressively cache assets (Vite hashes filenames),
-      // but never cache index.html or config.js
-      cacheControl: [
-        s3deploy.CacheControl.fromString(
-          'public, max-age=31536000, immutable',
-        ),
-      ],
+      prune: false,
+      cacheControl: [s3deploy.CacheControl.fromString('no-cache, must-revalidate')],
     })
+
+    // index.html names the hashed bundles, so it must never land before them.
+    entrypoint.node.addDependency(assets)
 
     // ── Grant CloudFront OAC read access to the bucket ─────────────────
     siteBucket.addToResourcePolicy(
@@ -138,6 +241,16 @@ export class FrontendStack extends cdk.Stack {
         },
       }),
     )
+
+    // ── Published for the invite & verification emails ─────────────────
+    // The Cognito CustomMessage trigger needs this URL, but it lives in the auth stack, which the
+    // frontend stack depends on — so it cannot be handed over as a synth-time reference without a
+    // cycle. SSM breaks it: the frontend writes here, the trigger reads at send time.
+    new ssm.StringParameter(this, 'AppUrlParameter', {
+      parameterName: appUrlParameterName(projectName),
+      stringValue: this.distributionUrl,
+      description: 'Public URL of the app, read by the Cognito email trigger',
+    })
 
     // ── Outputs ────────────────────────────────────────────────────────
     new cdk.CfnOutput(this, 'DistributionUrl', {

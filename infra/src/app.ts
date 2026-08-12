@@ -1,62 +1,33 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib'
-import * as ecrassets from 'aws-cdk-lib/aws-ecr-assets'
-import { AgentStack, type AgentAuthMode } from './stacks/agent-stack.js'
+import { AgentStack } from './stacks/agent-stack.js'
 import { AuthStack } from './stacks/auth-stack.js'
 import { BffStack } from './stacks/bff-stack.js'
 import { FrontendStack } from './stacks/frontend-stack.js'
+import {
+  DEFAULT_PROJECT_NAME,
+  DEFAULT_REGION,
+  cognitoDiscoveryUrl,
+  pickDefinedEnvironment,
+  resolveAgentAuthMode,
+  resolveAgentImagePlatform,
+  resolveAlertEmail,
+  resolveAllowedOrigin,
+  resolveApiThrottle,
+  resolveFrontendAgentMode,
+  resolveMonthlyBudgetUsd,
+  resolvePublicSignUpEnabled,
+  resolveRetainData,
+} from './config.js'
 
 const app = new cdk.App()
 
-const projectName = app.node.tryGetContext('projectName') ??  process.env.PROJECT_NAME ?? 'demo-strands-agents-ts'
-
-function resolveAgentAuthMode(input?: string): AgentAuthMode {
-  const normalized = input?.trim().toLowerCase()
-
-  if (!normalized || normalized === 'jwt' || normalized === 'cognito') {
-    return 'cognito'
-  }
-
-  if (normalized === 'sigv4') {
-    return 'sigv4'
-  }
-
-  throw new Error(`Unsupported AGENT_AUTH_MODE: ${input}`)
-}
-
-function resolveFrontendAgentMode(agentAuthMode: AgentAuthMode) {
-  return agentAuthMode === 'cognito' ? 'direct' as const : 'bff' as const
-}
-
-function pickDefinedEnvironment(keys: string[]) {
-  return Object.fromEntries(
-    keys
-      .map((key) => [key, process.env[key]])
-      .filter(([, value]) => value && value.trim().length > 0),
-  ) as Record<string, string>
-}
-
-function resolveAgentImagePlatform(input?: string) {
-  const normalized = input?.trim().toLowerCase()
-
-  if (!normalized || normalized === 'linux/arm64' || normalized === 'arm64') {
-    return ecrassets.Platform.LINUX_ARM64
-  }
-
-  if (normalized === 'linux/amd64' || normalized === 'amd64') {
-    return ecrassets.Platform.LINUX_AMD64
-  }
-
-  if (normalized === 'current' || normalized === 'local' || normalized === 'host') {
-    return undefined
-  }
-
-  return ecrassets.Platform.custom(input as string)
-}
+const projectName =
+  app.node.tryGetContext('projectName') ?? process.env.PROJECT_NAME ?? DEFAULT_PROJECT_NAME
 
 const env = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
-  region: process.env.CDK_DEFAULT_REGION ?? process.env.AWS_REGION ?? 'us-east-1',
+  region: process.env.CDK_DEFAULT_REGION ?? process.env.AWS_REGION ?? DEFAULT_REGION,
 }
 
 const agentAuthMode = resolveAgentAuthMode(
@@ -69,9 +40,25 @@ const agentImagePlatform = resolveAgentImagePlatform(
   app.node.tryGetContext('agentImagePlatform') ?? process.env.AGENT_IMAGE_PLATFORM,
 )
 
+const publicSignUpEnabled = resolvePublicSignUpEnabled(
+  app.node.tryGetContext('publicSignUpEnabled') ?? process.env.PUBLIC_SIGNUP_ENABLED,
+)
+
+// ── Pilot / production guardrails ──────────────────────────────────────
+const retainData = resolveRetainData(process.env.RETAIN_DATA)
+const alertEmail = resolveAlertEmail(process.env.ALERT_EMAIL)
+const monthlyBudgetUsd = resolveMonthlyBudgetUsd(process.env.MONTHLY_BUDGET_USD)
+const throttle = resolveApiThrottle(process.env.API_RATE_LIMIT, process.env.API_BURST_LIMIT)
+const allowedOrigin = resolveAllowedOrigin(process.env.ALLOWED_ORIGIN)
+
+const appUrl = process.env.APP_URL?.trim() || undefined
+
 // ── Auth (Cognito User Pool + Identity Pool) ───────────────────────────
 const authStack = new AuthStack(app, `${projectName}-auth`, {
   projectName,
+  publicSignUpEnabled,
+  retainData,
+  appUrl,
   env,
 })
 
@@ -80,8 +67,10 @@ const agentStack = new AgentStack(app, `${projectName}-agent`, {
   projectName,
   agentAuthMode,
   imagePlatform: agentImagePlatform,
-  cognitoDiscoveryUrl: `https://cognito-idp.${env.region ?? 'us-east-1'}.amazonaws.com/${authStack.userPool.userPoolId}/.well-known/openid-configuration`,
+  cognitoDiscoveryUrl: cognitoDiscoveryUrl(env.region ?? DEFAULT_REGION, authStack.userPool.userPoolId),
   cognitoUserPoolClientId: authStack.userPoolClient.userPoolClientId,
+  // Scoped grant to invoke this one runtime — see the note in auth-stack.ts.
+  invokerRole: authStack.authenticatedRole,
   runtimeEnvironment: pickDefinedEnvironment([
     'BEDROCK_MODEL_ID',
     'EXCHANGE_RATE_MCP_URL',
@@ -99,6 +88,10 @@ const bffStack = new BffStack(app, `${projectName}-bff`, {
   projectName,
   userPool: authStack.userPool,
   agentRuntimeArn: agentStack.runtimeArn,
+  throttle,
+  allowedOrigin,
+  alertEmail,
+  monthlyBudgetUsd,
   env,
 })
 bffStack.addDependency(agentStack)
@@ -112,8 +105,10 @@ const frontendStack = new FrontendStack(app, `${projectName}-frontend`, {
   cognitoUserPoolId: authStack.userPool.userPoolId,
   cognitoUserPoolClientId: authStack.userPoolClient.userPoolClientId,
   cognitoIdentityPoolId: authStack.identityPool.ref,
-  cognitoRegion: env.region ?? 'us-east-1',
+  cognitoRegion: env.region ?? DEFAULT_REGION,
   agentRuntimeArn: agentStack.runtimeArn,
+  publicSignUpEnabled,
+  retainData,
   env,
 })
 frontendStack.addDependency(bffStack)

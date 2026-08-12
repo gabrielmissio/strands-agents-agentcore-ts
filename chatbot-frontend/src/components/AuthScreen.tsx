@@ -1,26 +1,50 @@
 import { useState } from 'react'
-import { signIn, signUp, confirmSignUp, type SignInOutput } from 'aws-amplify/auth'
+import { confirmSignIn, confirmSignUp, signIn, signUp, type SignInOutput } from 'aws-amplify/auth'
+import { isPublicSignUpEnabled } from '@/lib/auth.ts'
+import { useI18n } from '@/lib/i18n/context.ts'
+import { LanguageSwitcher } from './LanguageSwitcher.tsx'
 
-type AuthView = 'signIn' | 'signUp' | 'confirmSignUp'
+type AuthView = 'signIn' | 'signUp' | 'confirmSignUp' | 'newPassword'
 
 export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const { t, locale } = useI18n()
+  const publicSignUp = isPublicSignUpEnabled()
   const [view, setView] = useState<AuthView>('signIn')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmCode, setConfirmCode] = useState('')
+  const [newPassword, setNewPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  /**
+   * Routes a sign-in/challenge result to the next view.
+   *
+   * `CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED` is the challenge Cognito returns on an
+   * admin-created user's first sign-in (their password is a temporary one) — it can happen whether
+   * or not public sign-up is enabled, since an admin can always create a user directly.
+   */
+  const applyResult = (result: SignInOutput) => {
+    if (result.isSignedIn) {
+      onAuthenticated()
+      return
+    }
+
+    if (result.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
+      setView('newPassword')
+      return
+    }
+
+    setError(t('auth.unsupportedStep', { step: result.nextStep.signInStep }))
+  }
 
   const handleSignIn = async () => {
     setError('')
     setLoading(true)
     try {
-      const result: SignInOutput = await signIn({ username: email, password })
-      if (result.isSignedIn) {
-        onAuthenticated()
-      }
+      applyResult(await signIn({ username: email, password }))
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed')
+      setError(err instanceof Error ? err.message : t('auth.signInFailed'))
     } finally {
       setLoading(false)
     }
@@ -33,11 +57,13 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
       await signUp({
         username: email,
         password,
-        options: { userAttributes: { email } },
+        // The current UI language, so the CustomMessage trigger can send the verification (and any
+        // later invite) email in it — see LOCALE_ATTRIBUTE in chatbot-bff/src/admin.ts.
+        options: { userAttributes: { email, 'custom:inviteLocale': locale } },
       })
       setView('confirmSignUp')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign up failed')
+      setError(err instanceof Error ? err.message : t('auth.signUpFailed'))
     } finally {
       setLoading(false)
     }
@@ -54,7 +80,19 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
         onAuthenticated()
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Confirmation failed')
+      setError(err instanceof Error ? err.message : t('auth.confirmationFailed'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleNewPassword = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      applyResult(await confirmSignIn({ challengeResponse: newPassword }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('auth.newPasswordFailed'))
     } finally {
       setLoading(false)
     }
@@ -64,19 +102,28 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
     e.preventDefault()
     if (view === 'signIn') handleSignIn()
     else if (view === 'signUp') handleSignUp()
-    else handleConfirm()
+    else if (view === 'confirmSignUp') handleConfirm()
+    else handleNewPassword()
   }
 
   return (
-    <div className="flex h-[100dvh] items-center justify-center" style={{ background: 'var(--gradient-cave)' }}>
+    <div
+      className="relative flex h-[100dvh] items-center justify-center"
+      style={{ background: 'var(--gradient-cave)' }}
+    >
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
+
       <form
         onSubmit={onSubmit}
         className="w-full max-w-sm rounded-2xl border-[3px] border-cave bg-card p-6 shadow-[var(--shadow-stone)]"
       >
         <h2 className="mb-4 text-center font-display text-xl uppercase text-cave">
-          {view === 'signIn' && '🦴 Sign In'}
-          {view === 'signUp' && '🪨 Sign Up'}
-          {view === 'confirmSignUp' && '✨ Verify Email'}
+          {view === 'signIn' && t('auth.signInTitle')}
+          {view === 'signUp' && t('auth.signUpTitle')}
+          {view === 'confirmSignUp' && t('auth.verifyEmailTitle')}
+          {view === 'newPassword' && t('auth.newPasswordTitle')}
         </h2>
 
         {error && (
@@ -85,23 +132,23 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
           </div>
         )}
 
-        {view !== 'confirmSignUp' ? (
+        {(view === 'signIn' || view === 'signUp') && (
           <>
             <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-cave/70">
-              Email
+              {t('auth.email')}
             </label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="stone-tablet mb-3 w-full px-3 py-2 text-sm font-semibold text-cave placeholder:text-cave/50 focus:outline-none"
-              placeholder="caveman@example.com"
+              placeholder={t('auth.emailPlaceholder')}
               required
               autoFocus
             />
 
             <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-cave/70">
-              Password
+              {t('auth.password')}
             </label>
             <input
               type="password"
@@ -112,13 +159,15 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
               required
             />
           </>
-        ) : (
+        )}
+
+        {view === 'confirmSignUp' && (
           <>
             <p className="mb-3 text-center text-sm font-semibold text-cave/70">
-              Check your email for a verification code
+              {t('auth.checkEmailForCode')}
             </p>
             <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-cave/70">
-              Confirmation Code
+              {t('auth.confirmationCode')}
             </label>
             <input
               type="text"
@@ -132,33 +181,60 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: () => void })
           </>
         )}
 
+        {view === 'newPassword' && (
+          <>
+            <p className="mb-3 text-center text-sm font-semibold text-cave/70">
+              {t('auth.newPasswordPrompt')}
+            </p>
+            <label className="mb-1 block text-xs font-bold uppercase tracking-wider text-cave/70">
+              {t('auth.newPassword')}
+            </label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="stone-tablet mb-4 w-full px-3 py-2 text-sm font-semibold text-cave placeholder:text-cave/50 focus:outline-none"
+              placeholder="••••••••"
+              required
+              autoFocus
+            />
+          </>
+        )}
+
         <button
           type="submit"
           disabled={loading}
           className="w-full rounded-2xl border-[3px] border-cave bg-fire py-2.5 font-display text-sm uppercase text-fire-foreground shadow-[var(--shadow-stone)] transition active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading
-            ? 'Loading…'
+            ? t('common.loading')
             : view === 'signIn'
-              ? 'Enter Cave'
+              ? t('auth.submitSignIn')
               : view === 'signUp'
-                ? 'Create Account'
-                : 'Verify'}
+                ? t('auth.submitSignUp')
+                : view === 'confirmSignUp'
+                  ? t('auth.submitVerify')
+                  : t('auth.submitNewPassword')}
         </button>
 
-        {view === 'signIn' && (
+        {view === 'signIn' && publicSignUp && (
           <p className="mt-3 text-center text-xs font-semibold text-cave/60">
-            No account?{' '}
+            {t('auth.noAccountPrompt')}{' '}
             <button type="button" onClick={() => { setView('signUp'); setError('') }} className="text-moss underline">
-              Sign Up
+              {t('auth.signUpLink')}
             </button>
+          </p>
+        )}
+        {view === 'signIn' && !publicSignUp && (
+          <p className="mt-3 text-center text-xs font-semibold text-cave/60">
+            {t('auth.inviteOnlyHint')}
           </p>
         )}
         {view === 'signUp' && (
           <p className="mt-3 text-center text-xs font-semibold text-cave/60">
-            Already have account?{' '}
+            {t('auth.alreadyHaveAccountPrompt')}{' '}
             <button type="button" onClick={() => { setView('signIn'); setError('') }} className="text-moss underline">
-              Sign In
+              {t('auth.signInLink')}
             </button>
           </p>
         )}

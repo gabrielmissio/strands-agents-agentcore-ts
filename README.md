@@ -14,8 +14,9 @@ It is designed for anyone looking for a practical starting point to quickly depl
 * A Strands-based agent running on Amazon Bedrock AgentCore Runtime
 * A React chatbot frontend
 * An AWS Lambda-based BFF for proxied integration
-* Amazon Cognito authentication for browser access
-* AWS CDK infrastructure for runtime, auth, frontend hosting, and BFF
+* Amazon Cognito authentication for browser access, with public self sign-up or invite-only enrollment controlled by a single env var
+* An admin panel and API for inviting users and managing access without leaving the browser
+* AWS CDK infrastructure for runtime, auth, frontend hosting, and BFF, with opt-in operational guardrails (data retention, spend alarms, request throttling)
 
 ## Prerequisites
 
@@ -114,6 +115,8 @@ Important configuration switches:
 
 * `VITE_AGENT_MODE` — frontend integration mode
 * `AGENT_AUTH_MODE` — deployment/auth mode used by the infrastructure
+* `PUBLIC_SIGNUP_ENABLED` — public self sign-up (default) vs. invite-only auth; see [infra/README.md](infra/README.md#user-provisioning-invite-only)
+* `RETAIN_DATA`, `ALERT_EMAIL`, `MONTHLY_BUDGET_USD`, `API_RATE_LIMIT`/`API_BURST_LIMIT` — opt-in operational guardrails; see [infra/README.md](infra/README.md#guardrails)
 
 See each package’s `.env.example` file for the full list of settings.
 
@@ -133,12 +136,30 @@ The root package provides a small set of convenience commands for common workflo
 
 | Script                       | Purpose                                                              |
 | ---------------------------- | -------------------------------------------------------------------- |
-| `npm run bootstrap`          | Install locked dependencies for the root package and each subpackage |
+| `npm run bootstrap`          | Install locked dependencies for the root package and each subpackage (`npm ci`) |
+| `npm run install:all`        | Same, but with `npm install` — use when a lockfile needs updating, e.g. after adding a dependency |
+| `npm run install:all:fix`    | `install:all`, then `npm audit fix` in the root package and each subpackage (semver-compatible fixes only — no `--force`). Each `audit fix` runs regardless of whether an earlier one still has unresolved findings, so one package short of a full fix never blocks the rest |
 | `npm run lint`               | Run repository-wide ESLint checks                                    |
+| `npm run typecheck`          | Run `tsc --noEmit` in every subpackage                                |
+| `npm run test`               | Run the test suite in every subpackage (vitest)                       |
+| `npm run verify`             | `lint` + `typecheck` + `test` — what to run before opening a PR      |
 | `npm run synth`              | Build deployable artifacts and synthesize the CDK app                |
 | `npm run deploy`             | Deploy all infrastructure                                            |
 | `npm run destroy`            | Destroy all deployed stacks                                          |
 | `npm run docker:setup-arm64` | Enable local ARM64 Docker emulation for agent image builds           |
+
+`npm run install:all:fix` only makes semver-compatible changes, but in `infra/` that still isn't risk-free: `npm audit fix` can bump `aws-cdk-lib` within its declared range (`^2.250.0`) to a version whose cloud-assembly schema is newer than the pinned `aws-cdk` CLI (`aws-cdk-lib`'s own devDependency, `^2.1118.3`) can read — `cdk synth` then fails with a schema-version mismatch, even though nothing in `infra/package.json` changed. Run `npm run synth` after using this script and, if it fails that way, either bump `aws-cdk` to the version the error message names or revert `infra/package-lock.json`.
+
+## Testing
+
+Every package uses [vitest](https://vitest.dev), scoped to `environment: 'node'` — no AWS credentials, no Docker, no browser needed for `npm test` to run in any of them. Current coverage:
+
+* **`agent/`** — the tool functions (`calculator`, `letterCounter`), the request-body size limits, and a drift guard asserting `tsconfig.json`'s inlined compiler options stay in sync with the repo base (see the note in `agent/tsconfig.json` about why it can't just `extends` that file).
+* **`chatbot-bff/`** — CORS/SSE framing, prompt-length validation, session-id binding to the authenticated caller, admin request parsing and claim checks, and the AgentCore SDK stream-shape normalization that a past production bug was caused by.
+* **`infra/`** — every env-var/context resolver in `config.ts`, plus synthesized-template assertions (`aws-cdk-lib/assertions`) for the specific security and correctness properties this template has regressed on before: the Cognito authenticated role carrying no IAM policy, the `inviteLocale` custom attribute not colliding with a reserved name, Lambda timeouts staying under API Gateway's integration ceiling, and the CloudFront cache-control split between hashed assets and the entrypoint. `AgentStack` is deliberately excluded — it builds a real Docker image at synth time, which is correct for `cdk synth`/`deploy` but too slow and environment-dependent for a unit-test run.
+* **`chatbot-frontend/`** — `src/lib/` only: the i18n engine (locale fallback, pluralization, catalog completeness), reading admin-group membership off a decoded token, and SSE stream parsing.
+
+What's deliberately not covered yet: rendered React components (`AuthScreen`, `ChatExperience`, `AdminPanel`, `LanguageSwitcher`). That needs `@testing-library/react` + `jsdom`, which none of the four `vitest.config.ts` files currently pull in — a scoped follow-up, not an oversight.
 
 ## Deployment notes
 

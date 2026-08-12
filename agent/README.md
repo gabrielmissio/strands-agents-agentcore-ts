@@ -37,6 +37,7 @@ The local runtime listens on `http://localhost:8080` and exposes:
 | `npm run mcp:http` | Start the local HTTP MCP server |
 | `npm run invoke:bedrock` | Invoke a deployed AgentCore runtime |
 | `npm run typecheck` | Run TypeScript type checking |
+| `npm run test` | Run the test suite (vitest) |
 
 ## Environment variables
 
@@ -69,6 +70,8 @@ curl --location 'http://localhost:8080/invocations' \
 ```
 
 ## Docker
+
+Multi-stage build (`node:22-slim`, pinned to match `tsup`'s `node22` target and the Lambda/AgentCore runtimes): a `build` stage runs `npm ci` and `npm run build`, then only `dist/` and production dependencies are copied into the `runtime` stage. `.dockerignore` excludes `node_modules`, `dist`, and tests from the build context — without it, any `npm install` would change the context hash and force a full image rebuild even when no source changed.
 
 Build the image:
 

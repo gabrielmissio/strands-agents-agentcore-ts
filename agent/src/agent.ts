@@ -33,14 +33,35 @@ const oraculoDoBichoMcp = new strands.McpClient({
   }),
 })
 
-export const agent = new strands.Agent({
-  systemPrompt: `speak like a caveman`,
-  model: new strands.BedrockModel({
-    region: process.env.AWS_REGION || 'us-east-1',
-    modelId: process.env.BEDROCK_MODEL_ID || 'global.anthropic.claude-sonnet-4-6',
-  }),
-  tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoToolsMcp, oraculoDoBichoMcp, ...(exchangeRateMcp ? [exchangeRateMcp] : [])],
+/**
+ * Shared across requests on purpose: `BedrockModel`'s constructor builds a `BedrockRuntimeClient`,
+ * so a per-request model would mean a per-request connection pool and a TLS handshake on the
+ * critical path of every call. The client itself is stateless between invocations — unlike the
+ * `Agent` built around it below, which is why that part is not shared.
+ */
+const bedrockModel = new strands.BedrockModel({
+  region: process.env.AWS_REGION || 'us-east-1',
+  modelId: process.env.BEDROCK_MODEL_ID || 'global.anthropic.claude-sonnet-4-6',
 })
+
+/**
+ * Builds a fresh agent for one request — never a shared one.
+ *
+ * A Strands `Agent` retains its own `messages` array across turns. A module-level agent reused
+ * across requests in a warm container therefore accumulates conversation state *across callers*,
+ * which is wrong in two ways: one user's conversation can leak into the next user's prompt, and two
+ * concurrent invocations landing on the same warm container interleave their appends into one array.
+ *
+ * The agent object itself is cheap to allocate — a prompt, a tool list and an empty array — the
+ * expensive part, the Bedrock client, is the module-level `bedrockModel` shared above.
+ */
+export function createAgent(): strands.Agent {
+  return new strands.Agent({
+    systemPrompt: `speak like a caveman`,
+    model: bedrockModel,
+    tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoToolsMcp, oraculoDoBichoMcp, ...(exchangeRateMcp ? [exchangeRateMcp] : [])],
+  })
+}
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
