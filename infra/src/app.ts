@@ -86,7 +86,7 @@ const agentStack = new AgentStack(app, `${projectName}-agent`, {
   ]),
   env,
 })
-agentStack.addDependency(authStack)
+agentStack.addStackDependency(authStack)
 
 // ── BFF (API Gateway + Lambda) ─────────────────────────────────────────────────
 const bffStack = new BffStack(app, `${projectName}-bff`, {
@@ -100,7 +100,7 @@ const bffStack = new BffStack(app, `${projectName}-bff`, {
   monthlyBudgetUsd,
   env,
 })
-bffStack.addDependency(agentStack)
+bffStack.addStackDependency(agentStack)
 
 // ── Frontend (S3 + CloudFront) ─────────────────────────────────────────
 // Must run AFTER auth and bff stacks so their outputs are available.
@@ -117,4 +117,4 @@ const frontendStack = new FrontendStack(app, `${projectName}-frontend`, {
   retainData,
   env,
 })
-frontendStack.addDependency(bffStack)
+frontendStack.addStackDependency(bffStack)
