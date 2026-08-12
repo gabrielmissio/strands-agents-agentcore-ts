@@ -166,11 +166,14 @@ const alertEmail = resolveAlertEmail(process.env.ALERT_EMAIL)
 const monthlyBudgetUsd = resolveMonthlyBudgetUsd(process.env.MONTHLY_BUDGET_USD)
 const throttle = resolveApiThrottle(process.env.API_RATE_LIMIT, process.env.API_BURST_LIMIT)
 
+const appUrl = process.env.APP_URL?.trim() || undefined
+
 // ── Auth (Cognito User Pool + Identity Pool) ───────────────────────────
 const authStack = new AuthStack(app, `${projectName}-auth`, {
   projectName,
   publicSignUpEnabled,
   retainData,
+  appUrl,
   env,
 })
 

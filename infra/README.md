@@ -43,6 +43,7 @@ Use [infra/.env.example](.env.example) as the source of truth.
 | `AGENT_IMAGE_PLATFORM` | No | Docker platform for the agent image build |
 | `AGENT_AUTH_MODE` | No | Agent runtime auth mode. Also derives the deployed frontend transport mode: `JWT` -> `direct`, `SIGV4` -> `bff` |
 | `PUBLIC_SIGNUP_ENABLED` | No | `true` (default): visitors can self sign-up. `false`: invite-only — see below |
+| `APP_URL` | No | Canonical app URL, linked from the invite/verification emails. Unset, falls back to the frontend stack's CloudFront URL — see [Emails](#emails) |
 | `RETAIN_DATA` | No | `true` (default): the user pool and frontend bucket survive `cdk destroy`. `false`: disposable environment — see below |
 | `ALERT_EMAIL` | No | Subscribed to the CloudWatch alarms and the budget notification |
 | `MONTHLY_BUDGET_USD` | No | Monthly spend ceiling that triggers a budget notification at 80%/100%. Requires `ALERT_EMAIL` |
@@ -86,6 +87,15 @@ aws cognito-idp list-users-in-group \
 ```
 
 Group changes only reach the browser on the next token issuance — the user has to sign out and back in, or wait for the refresh token to mint a new access token. The admin badge in the UI is cosmetic; the BFF's admin routes re-check group membership server-side on every call (see `chatbot-bff/src/admin.ts`), so a stale client-side claim can under-grant but never over-grant access.
+
+## Emails
+
+Cognito sends two emails this stack controls: the admin-invite (temporary password) message, and the self sign-up confirmation code. Both are configured twice, on purpose:
+
+- **A plain-text template on the user pool itself** (`userInvitation` / `userVerification` in `auth-stack.ts`) — the fallback that goes out if the trigger below declines or fails.
+- **A [CustomMessage Lambda trigger](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-custom-message.html)** (`lambdas/custom-message/`) that rewrites both as designed HTML (table layout, inline styles, no images — deliverability rules documented in `email-template.mjs`) and, when the app's URL is known, adds a sign-in link. It only touches these two trigger sources; forgot-password and any other Cognito email keep using the pool's own defaults. It never throws — any failure falls back to the plain-text template above, so a broken template can degrade an email, not block sign-up or user creation.
+
+The link needs the app's URL, which the auth stack cannot get as a synth-time reference — the frontend stack (which owns the CloudFront distribution) depends on the auth stack, not the other way around, so a direct reference would cycle. `APP_URL` breaks that: set it explicitly, or leave it unset and the trigger reads whatever URL the frontend stack last published to SSM (`/<project>/app-url`, written by `frontend-stack.ts`). On a fresh `cdk deploy --all` this resolves itself: the parameter exists by the time anyone actually signs up or gets invited. Before that — or if `frontend/` was never deployed — the trigger just omits the link rather than failing.
 
 ## Guardrails
 

@@ -1,7 +1,10 @@
 import * as cdk from 'aws-cdk-lib'
 import * as cognito from 'aws-cdk-lib/aws-cognito'
 import * as iam from 'aws-cdk-lib/aws-iam'
+import * as lambda from 'aws-cdk-lib/aws-lambda'
+import * as logs from 'aws-cdk-lib/aws-logs'
 import { Construct } from 'constructs'
+import { appUrlParameterName } from './frontend-stack.js'
 
 export interface AuthStackProps extends cdk.StackProps {
   projectName: string
@@ -20,6 +23,16 @@ export interface AuthStackProps extends cdk.StackProps {
    * disposable environment.
    */
   retainData?: boolean
+  /**
+   * Canonical URL of the app, put in the invite and sign-up-confirmation emails so the recipient
+   * knows where to sign in.
+   *
+   * Optional because the frontend stack also publishes its CloudFront URL to SSM, which the
+   * CustomMessage trigger reads when this is unset — that is what makes a fresh `cdk deploy --all`
+   * produce working, linked emails with no manual step. Set this once there is a real domain: it
+   * wins over the SSM value.
+   */
+  appUrl?: string
 }
 
 /**
@@ -58,7 +71,7 @@ export class AuthStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: AuthStackProps) {
     super(scope, id, props)
 
-    const { projectName, publicSignUpEnabled = true, retainData = true } = props
+    const { projectName, publicSignUpEnabled = true, retainData = true, appUrl } = props
 
     // ── User Pool ──────────────────────────────────────────────────────
     this.userPool = new cognito.UserPool(this, 'UserPool', {
@@ -69,22 +82,36 @@ export class AuthStack extends cdk.Stack {
       standardAttributes: {
         email: { required: true, mutable: true },
       },
-      // Only used when invite-only: the message Cognito sends an admin-created user along with
-      // their temporary password. Ignored when self sign-up is enabled — nobody is invited.
-      ...(publicSignUpEnabled
-        ? {}
-        : {
-            userInvitation: {
-              emailSubject: `Your ${projectName} access`,
-              emailBody: [
-                'Hello {username},',
-                '',
-                'An account was created for you. Sign in with this temporary password and choose a new one:',
-                '',
-                '{####}',
-              ].join('<br/>'),
-            },
-          }),
+      // Plain-text fallbacks for the two emails the CustomMessage trigger below rewrites as
+      // designed HTML. They are what goes out if the trigger declines or fails — see the note on
+      // `customMessageFn` — so they stay legible rather than duplicating the template in
+      // `lambdas/custom-message/email-template.mjs`.
+      //
+      // Both apply regardless of `publicSignUpEnabled`: an admin can always invite a user via
+      // `AdminCreateUser` — the CLI or the admin panel — whether or not public sign-up is also on,
+      // and `userVerification` simply goes unused when self sign-up is off (`SignUp` is blocked
+      // at the API, so its trigger source never fires).
+      userInvitation: {
+        emailSubject: `Your ${projectName} access`,
+        emailBody: [
+          'Hello {username},',
+          '',
+          'An administrator created an account for you. Use this temporary password to sign in:',
+          '',
+          '{####}',
+          '',
+          'You will be asked to choose your own password the first time you sign in.',
+        ].join('<br/>'),
+      },
+      userVerification: {
+        emailSubject: `Confirm your ${projectName} account`,
+        emailBody: [
+          'Confirm your email to finish creating your account.',
+          '',
+          'Verification code: {####}',
+        ].join('<br/>'),
+        emailStyle: cognito.VerificationEmailStyle.CODE,
+      },
       passwordPolicy: {
         minLength: 8,
         requireLowercase: true,
@@ -97,6 +124,50 @@ export class AuthStack extends cdk.Stack {
       // forces replacement, would take them all with it.
       removalPolicy: retainData ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
     })
+
+    // ── HTML invite & verification emails ────────────────────────────────
+    // Cognito calls this trigger before sending the two emails configured above; it rewrites both
+    // as designed HTML and, when the app's URL is known, adds a link so the recipient can get there
+    // in one click. It sits on the critical path of `AdminCreateUser` and `SignUp`, which is why the
+    // function swallows its own failures and lets the plain-text templates above go out instead.
+    const appUrlParameter = appUrlParameterName(projectName)
+
+    const customMessageFn = new lambda.Function(this, 'CustomMessageFunction', {
+      functionName: `${projectName}-custom-message`,
+      code: lambda.Code.fromAsset('lambdas/custom-message'),
+      handler: 'index.handler',
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: cdk.Duration.seconds(5),
+      memorySize: 128,
+      environment: {
+        APP_NAME: projectName,
+        // Empty unless configured; the trigger then falls back to the SSM parameter below.
+        APP_URL: appUrl ?? '',
+        APP_URL_PARAMETER: appUrlParameter,
+      },
+      logGroup: new logs.LogGroup(this, 'CustomMessageFunctionLogs', {
+        logGroupName: `/aws/lambda/${projectName}-custom-message`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      }),
+    })
+
+    // Granted by ARN rather than by importing the parameter construct: the parameter is created by
+    // the frontend stack, and importing it would reintroduce the very dependency SSM exists to break.
+    customMessageFn.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['ssm:GetParameter'],
+        resources: [
+          cdk.Arn.format(
+            { service: 'ssm', resource: 'parameter', resourceName: appUrlParameter.slice(1) },
+            this,
+          ),
+        ],
+      }),
+    )
+
+    this.userPool.addTrigger(cognito.UserPoolOperation.CUSTOM_MESSAGE, customMessageFn)
 
     // ── Groups (roles) ─────────────────────────────────────────────────
     // Cognito emits group membership as the `cognito:groups` claim in *both* the id token and the

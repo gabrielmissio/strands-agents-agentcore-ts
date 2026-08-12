@@ -3,7 +3,17 @@ import * as s3 from 'aws-cdk-lib/aws-s3'
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront'
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins'
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment'
+import * as ssm from 'aws-cdk-lib/aws-ssm'
 import { Construct } from 'constructs'
+
+/**
+ * Where the app's public URL is published for other stacks to read at runtime (not at synth time —
+ * see the note by `AppUrlParameter` below). A plain string function, not a construct: importing it
+ * elsewhere creates no CDK cross-stack reference, just agreement on a parameter name.
+ */
+export function appUrlParameterName(projectName: string): string {
+  return `/${projectName}/app-url`
+}
 
 export interface FrontendStackProps extends cdk.StackProps {
   projectName: string
@@ -176,6 +186,16 @@ export class FrontendStack extends cdk.Stack {
         },
       }),
     )
+
+    // ── Published for the invite & verification emails ─────────────────
+    // The Cognito CustomMessage trigger needs this URL, but it lives in the auth stack, which the
+    // frontend stack depends on — so it cannot be handed over as a synth-time reference without a
+    // cycle. SSM breaks it: the frontend writes here, the trigger reads at send time.
+    new ssm.StringParameter(this, 'AppUrlParameter', {
+      parameterName: appUrlParameterName(projectName),
+      stringValue: this.distributionUrl,
+      description: 'Public URL of the app, read by the Cognito email trigger',
+    })
 
     // ── Outputs ────────────────────────────────────────────────────────
     new cdk.CfnOutput(this, 'DistributionUrl', {
