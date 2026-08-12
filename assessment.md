@@ -1,254 +1,217 @@
-# Production Readiness Assessment
-
-## Summary
-
-This repository is a strong demo/reference implementation for Strands Agents + TypeScript + Amazon Bedrock AgentCore Runtime, but it is not yet production ready.
-
-The main gap is not core functionality. The agent, frontend, BFF, and CDK stacks demonstrate the intended architecture well. The gap is production hardening across security, delivery, operability, testing, and documentation consistency.
-
-A hardening pass since this assessment was first written closed several of the gaps below: a real over-broad IAM grant, a year-long CloudFront cache bug, a cross-user agent-conversation leak, an unbound BFF session id, destructive infra defaults, undocumented/placeholder module READMEs, and the absence of any test coverage. It also added an invite-only auth mode, an admin panel for user management, and English/Portuguese i18n. The sections below are marked accordingly — CI/CD, permissive CORS, and secret handling remain open.
-
-## Overall verdict
-
-- Architecture clarity: good for a demo/reference repository
-- Implementation completeness: enough to demonstrate both integration paths
-- Production readiness: partial
-- Recommended positioning: demo, starter, or internal reference template
-
-## Highest-priority gaps
-
-### 1. Documentation and behavior are not fully aligned
-
-Impact: high → largely addressed
-
-Why it matters:
-
-- The repository is explicitly intended as a reference implementation
-- In a reference repo, inaccurate documentation creates architectural confusion faster than code defects
-
-Evidence (current):
-
-- The frontend always requires Cognito sign-in before showing the chat experience in [chatbot-frontend/src/App.tsx](chatbot-frontend/src/App.tsx)
-- BFF requests still attach an ID token in [chatbot-frontend/src/lib/api.ts](chatbot-frontend/src/lib/api.ts)
-- The API Gateway BFF endpoint is protected with a Cognito authorizer in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts)
-- `chatbot-bff/README.md`, `chatbot-frontend/README.md`, and `infra/README.md` now document the auth flow (including the invite-only mode and the admin panel), the two integration modes, and the guardrail env vars explicitly — see gap #11, now resolved
-
-Remaining:
-
-- No repository-wide doc that puts direct mode and BFF mode side by side (who authenticates, who invokes AgentCore, where streaming terminates and is re-emitted) — each package README covers its own side of that boundary, but there is no single comparison table
-
-### 2. No CI/CD or automated quality gates
-
-Impact: high
-
-Why it matters:
-
-- A production-ready repo should prove that builds, type checks, linting, and packaging succeed on every change
-- This is especially important in a multi-package repo with frontend, backend, agent runtime, and CDK code
-
-Evidence:
-
-- There is no `.github/workflows` directory in the repository
-- No automated pipeline is present for install, typecheck, lint, build, or synth verification
-
-Recommendation:
-
-- Add CI for per-package install, typecheck, build, lint, and CDK synth
-- Add branch protection and required checks before merge
-- Publish a simple delivery policy in the root README or contribution guide
-
-### 3. No test coverage for critical paths
-
-Impact: high → largely addressed
-
-Evidence (current):
-
-- All four packages run vitest (`npm test` at the root fans out to each) — see [Testing](README.md#testing) in the root README for exactly what's covered
-- The frontend stream parser, the BFF's session binding and AgentCore stream normalization, `infra/src/config.ts`'s env resolvers, and CDK-synthesized-template assertions for the security properties this template has regressed on before (scoped IAM, Cognito schema, cache-control split, Lambda timeouts) are all covered
-- `infra/src/config.ts` and `chatbot-bff/src/http.ts` exist specifically so this logic is testable without synthesizing/deploying or hitting AWS
-
-Remaining:
-
-- No tests for rendered React components (`AuthScreen`, `ChatExperience`, `AdminPanel`) — needs `@testing-library/react` + `jsdom`, a scoped follow-up
-- `AgentStack` (the Docker-image-building stack) has no synthesized-template assertions, since exercising it would trigger a real `docker build` on every test run
-- Still no CI to run any of this automatically — see gap #2
-
-Recommendation:
-
-- Add component tests once the jsdom/testing-library dependency is worth taking on
-- Wire `npm run verify` (or at least `npm test`) into CI once gap #2 is addressed
-
-### 4. Security posture is demo-grade, not production-grade
-
-Impact: high
-
-Why it matters:
-
-- The current configuration is convenient for demo use but permissive for internet-facing deployment
-
-Evidence:
-
-- `ALLOWED_ORIGIN` defaults to `*` in the BFF examples and handler behavior, including [chatbot-bff/.env.example](chatbot-bff/.env.example) and [chatbot-bff/src/handler.ts](chatbot-bff/src/handler.ts) — this now applies to both the chat function and the new admin function
-- API Gateway CORS is configured with all origins in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts) (now covering `/chat` and `/admin/users` alike)
-- The frontend S3 bucket intentionally leaves the explicit public-access-block setting commented out because of an SCP issue in [infra/src/stacks/frontend-stack.ts](infra/src/stacks/frontend-stack.ts)
-- A private key is still described as an environment variable in [agent/.env.example](agent/.env.example)
-
-Recommendation:
-
-- Lock CORS to known origins per environment
-- Resolve the S3 public access control posture cleanly rather than relying on a commented exception note
-- Move secrets to AWS Secrets Manager or SSM Parameter Store and remove secret-style values from `.env` guidance
-- Add WAF, throttling, and abuse protections for public endpoints where appropriate
-
-### 5. Configuration validation is weak
-
-Impact: high → partially addressed in `infra/`
-
-Why it matters:
-
-- A multi-package system with different runtime modes should fail fast with clear validation errors
-- Missing or inconsistent configuration currently produces a mix of silent degradation and runtime failure
-
-Evidence:
-
-- `infra/src/app.ts` now validates every guardrail and mode env var it reads (`PUBLIC_SIGNUP_ENABLED`, `RETAIN_DATA`, `ALERT_EMAIL`, `MONTHLY_BUDGET_USD`, `API_RATE_LIMIT`/`API_BURST_LIMIT`, `AGENT_AUTH_MODE`, `AGENT_IMAGE_PLATFORM`) and throws a descriptive error on an unrecognized value, rather than silently falling back
-- The frontend auth config still logs a warning and continues when Cognito values are missing in [chatbot-frontend/src/lib/auth.ts](chatbot-frontend/src/lib/auth.ts)
-- Runtime configuration is still distributed across multiple `.env` files with no root orchestration or schema validation
-- `agent/` and `chatbot-bff/` still depend directly on `process.env` without a shared validation layer
-
-Recommendation:
-
-- Extend the infra package's fail-fast validation pattern to `agent/` and `chatbot-bff/`
-- Add a documented configuration matrix showing which variables are required in local direct mode, local BFF mode, and deployed environments
-
-## Medium-priority gaps
-
-### 6. Infrastructure defaults are not production-safe
-
-Impact: medium → mostly addressed
-
-Evidence (current):
-
-- The user pool and the frontend bucket now default to `RemovalPolicy.RETAIN`, controlled by `RETAIN_DATA` (default `true`) — see [infra/src/stacks/auth-stack.ts](infra/src/stacks/auth-stack.ts) and [infra/src/stacks/frontend-stack.ts](infra/src/stacks/frontend-stack.ts). `RETAIN_DATA=false` opts back into `DESTROY` for disposable environments; documented in [infra/README.md](infra/README.md#guardrails)
-- Lambda log retention is one month, not one week, in [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts)
-- API Gateway access logs, CloudWatch alarms (chat/admin Lambda errors, API 5XX), and an optional monthly budget were added — see gap #8
-
-Remaining:
-
-- The AgentCore runtime is still configured for public network mode in [infra/src/stacks/agent-stack.ts](infra/src/stacks/agent-stack.ts)
-
-Recommendation:
-
-- Reassess whether public network mode is required for the runtime in target environments
-
-### 7. Dependency management is not strict enough
-
-Impact: medium
-
-Evidence:
-
-- Critical dependencies are declared as `latest`, including `@aws-sdk/client-bedrock-agentcore` and `@strands-agents/sdk` in [agent/package.json](agent/package.json)
-- The BFF also uses `latest` for `@aws-sdk/client-bedrock-agentcore` and the newly-added `@aws-sdk/client-cognito-identity-provider` in [chatbot-bff/package.json](chatbot-bff/package.json)
-
-Recommendation:
-
-- Pin exact or bounded versions for runtime-critical dependencies
-- Add a dependency update policy and lockfile review cadence
-
-### 8. Operational observability is minimal
-
-Impact: medium → partially addressed
-
-Evidence (current):
-
-- The BFF's admin routes now emit one structured JSON audit line per privileged action (actor, action, target, outcome) — see `auditRecord` in [chatbot-bff/src/admin.ts](chatbot-bff/src/admin.ts)
-- API Gateway access logs are always on (identity and outcome, never the request body) in `/aws/apigateway/<project>-chat-api`
-- Three CloudWatch alarms (chat Lambda errors, admin Lambda errors, API 5XX) publish to an SNS topic, optionally subscribed via `ALERT_EMAIL` — see [infra/src/stacks/bff-stack.ts](infra/src/stacks/bff-stack.ts) and [infra/README.md](infra/README.md#guardrails)
-
-Remaining:
-
-- Chat-path and agent-runtime logging is still plain `console.log`/`console.error`, with no structured convention or request/session correlation ID propagation
-- No latency, invocation-count, or downstream tool-failure metrics; no dashboard, only error-count alarms
-
-Recommendation:
-
-- Standardize structured logs with request/session correlation identifiers across the chat path and the agent runtime, matching the pattern already used for admin audit logs
-- Define a baseline CloudWatch dashboard
-- Add metrics around invocation count, latency, and downstream tool failures
-
-### 9. Monorepo ergonomics are incomplete
-
-Impact: medium
-
-Evidence:
-
-- The repo is multi-package but not configured as an npm workspace
-- The root package only exposes lint scripts and does not orchestrate install, typecheck, or build for all packages
-
-Recommendation:
-
-- Introduce npm workspaces, pnpm, or Turbo/Nx-style orchestration
-- Add root-level scripts for bootstrap, build, lint, typecheck, and test
-
-### 10. Architecture decisions still have unresolved TODOs
-
-Impact: medium → resolved
-
-The TODO this pointed at — whether the Cognito identity pool's authenticated role should keep a blanket `bedrock-agentcore:InvokeAgentRuntime` grant — is gone. That role now carries no policy of its own; the agent stack grants the permission scoped to its one runtime ARN (see [infra/src/stacks/agent-stack.ts](infra/src/stacks/agent-stack.ts) and the note in [infra/src/stacks/auth-stack.ts](infra/src/stacks/auth-stack.ts)). This also closed a real gap: previously any signed-in user could invoke *any* agent runtime in the account, not just this deployment's.
-
-No other unresolved architecture TODOs are currently present in `infra/src`.
-
-## Lower-priority improvements
-
-### 11. Module-level docs need expansion
-
-Impact: low → resolved
-
-[chatbot-frontend/README.md](chatbot-frontend/README.md), [chatbot-bff/README.md](chatbot-bff/README.md), and [infra/README.md](infra/README.md) now cover setup, environment variables, local run steps, deployment boundaries, and the auth/admin/guardrail behavior specific to each package. [agent/README.md](agent/README.md) was already substantive and remains so.
-
-### 12. A production operating model is not documented
-
-Impact: low
-
-Recommendation:
-
-- Add architecture decision records or a concise operations guide covering environments, rollback strategy, secrets management, SLOs, alarms, and incident ownership
-
-## What is already strong
-
-- The repo clearly separates agent runtime, frontend, BFF, and infrastructure concerns
-- The two integration patterns are represented in real code rather than slideware
-- Runtime config injection for the static frontend is a practical choice for a demo and a useful production pattern when hardened
-- The BFF correctly centralizes AgentCore SigV4 invocation when that pattern is desired
-- The agent package demonstrates local execution, local MCP tooling, and deployed invocation paths
-- Auth supports both public self sign-up and an invite-only mode (`PUBLIC_SIGNUP_ENABLED`), with the pool-level enforcement and the frontend flow kept in sync
-- The admin panel's authorization boundary is enforced server-side, not just hidden client-side: the BFF's admin routes re-check `cognito:groups` on every call, so a stale or forged client claim can under-grant access but never over-grant it
-- IAM grants follow least privilege where recently touched: the Cognito authenticated role carries no policy of its own, and the admin Lambda's Cognito permissions are scoped to specific actions on one user pool ARN
-
-## Recommended path to “production ready”
-
-### Phase 1: reliability and correctness
-
-- ~~Align all README files with the current auth and integration behavior~~ — done
-- Add CI for install, lint, typecheck, build, and CDK synth
-- ~~Add tests for the stream parser, BFF handler, and config mode selection~~ — done (`npm test` at the root; see [Testing](README.md#testing)) — CI to run it automatically is still open
-- Pin runtime-critical dependencies
-
-### Phase 2: security and operations
-
-- Replace permissive CORS with environment-specific allowlists
-- Move secret material to managed secret stores
-- Extend structured logging and correlation IDs from the admin routes to the chat path and the agent runtime; add latency/invocation metrics and a dashboard
-- ~~Rework destructive infrastructure defaults for long-lived environments~~ — done (`RETAIN_DATA`, longer log retention, alarms, budget)
-
-### Phase 3: platform maturity
-
-- Introduce workspace tooling and root build/test orchestration
-- Add environment promotion guidance and rollback procedures
-- Add threat modeling and cost-control guidance for public-facing agent traffic
-
-## Final assessment
-
-If the goal is a professional demo/reference repository, this codebase is close: the documentation is now aligned with behavior, module READMEs are substantive, and the auth/infra defaults no longer contradict what the docs claim.
-
-If the goal is a production-ready template, the repo still needs meaningful work in CI/CD, test coverage, CORS/secrets hardening, and chat-path/agent-runtime observability before it should be used as a baseline for a real customer-facing deployment.
+# Assessment — strands-agents-agentcore-ts como template/bootstrapper
+
+**Data:** 2026-08-11
+**Branch avaliada:** `feat/base-template-v2` (HEAD `165ab0d`)
+**Metodologia:** leitura integral do código-fonte dos quatro pacotes (`agent/`, `chatbot-bff/`, `chatbot-frontend/`, `infra/`), dos stacks CDK, de todos os `README.md`, `.env.example` e testes; execução de `npm audit` em cada pacote. Este documento substitui integralmente a versão anterior de `assessment.md` — foi produzido do zero, sem reaproveitar suas conclusões.
+
+Pergunta central: **este repositório serve como template/bootstrapper confiável para (a) demos, (b) novos projetos agênticos internos, e (c) pilotos em produção com dados sensíveis?**
+
+---
+
+## Veredito executivo
+
+| Caso de uso | Prontidão | Justificativa |
+|---|---|---|
+| **Demo / prova de conceito** | ✅ Pronto | Arquitetura clara, dois padrões de integração bem documentados, deploy de ponta a ponta funcional (`npm run deploy`), guardrails opcionais já pensados (throttle, budget, alarmes). |
+| **Novo projeto agêntico interno (não sensível)** | ⚠️ Pronto com ressalvas | Boa base para copiar/adaptar, mas herda dívidas específicas (container root, deps em `latest`, CORS aberto, sem CI) que qualquer fork vai carregar sem perceber. |
+| **Piloto em produção com dados sensíveis** | ❌ Não pronto | Existem gaps que a própria equipe já sinaliza corretamente no README raiz ("not a production-ready template"), mas a lista de bloqueadores é maior e mais específica do que essa frase sugere — ver [P0](#p0--bloqueadores-para-qualquer-piloto-com-dados-sensíveis) abaixo. |
+
+O repositório é **honesto sobre seu próprio estágio** — isso é um ponto forte raro em templates de referência, e a engenharia por trás das partes que *foram* endurecidas (escopo de IAM do `authenticatedRole`, namespacing de sessão por `sub`, dupla função Lambda para separar admin de chat, guardrails de custo) é de qualidade notavelmente acima da média para um "reference repo". O problema não é falta de cuidado — é que o cuidado foi aplicado de forma desigual: partes do sistema (Cognito, IAM do runtime, sessão) receberam tratamento de produção; outras (chave de carteira EVM, container root, CORS, telemetria) ainda estão em modo demo, e nada no runtime as distingue.
+
+---
+
+## Sumário de achados por severidade
+
+| # | Severidade | Achado | Camada |
+|---|---|---|---|
+| 1 | 🔴 Critical | Container do agente roda como root (sem `USER` no Dockerfile) | agent/ |
+| 2 | 🟠 High | CORS travado em `*` na infra, mesmo com suporte a origem restrita no código | infra/ + chatbot-bff/ |
+| 3 | 🟠 High | Tokens Cognito (id/access/refresh) em `localStorage` — Amplify default | chatbot-frontend/ |
+| 4 | 🟠 High | Chave privada de carteira EVM (`EVM_PRIVATE_KEY`) vai em texto puro para env vars do runtime/subprocesso, sem Secrets Manager | agent/ + infra/ |
+| 5 | 🟠 High | Ferramenta MCP `vanity_address` devolve chave privada real na resposta do modelo | agent/ |
+| 6 | 🟠 High | Bucket S3 do frontend com `BlockPublicAccess.BLOCK_ALL` comentado por uma SCP específica do autor | infra/ |
+| 7 | 🟠 High | Dependências AWS/Strands SDK fixadas em `"latest"` em dois pacotes | agent/ + chatbot-bff/ |
+| 8 | 🟠 High | Processos MCP stdio compartilhados são ponto único de falha e gargalo de concorrência | agent/ |
+| 9 | 🟡 Medium | Sem CSP/security headers no CloudFront nem no `index.html` | chatbot-frontend/ + infra/ |
+| 10 | 🟡 Medium | Sem rate limit por usuário/sessão — só throttle global da API Gateway | chatbot-bff/ |
+| 11 | 🟡 Medium | Superfície de prompt injection indireta sem mitigação (JSON externo cru volta ao contexto do modelo) | agent/ |
+| 12 | 🟡 Medium | Servidor HTTP MCP sem autenticação, só allowlist de `Host` | agent/ |
+| 13 | 🟡 Medium | Erro de RPC não tratado pode vazar API key embutida na `EVM_RPC_URL` | agent/ |
+| 14 | 🟡 Medium | Sem VPC/isolamento de rede para o runtime do agente (`networkMode: PUBLIC` fixo) | infra/ |
+| 15 | 🟡 Medium | Sem WAF em API Gateway ou CloudFront | infra/ |
+| 16 | 🟡 Medium | Sem MFA configurado no Cognito (suportado, não habilitado) | infra/ |
+| 17 | 🟡 Medium | Logging não estruturado (`console.log`/`console.error`), sem correlation ID ponta a ponta | agent/ + chatbot-bff/ |
+| 18 | 🟡 Medium | Sem telemetria de erro no frontend — incidentes de cliente são invisíveis para operação | chatbot-frontend/ |
+| 19 | 🟡 Medium | Sem pipeline de CI — `npm run verify` existe mas não é executado automaticamente | repo/ |
+| 20 | 🟡 Medium | Testes ausentes nos pontos de entrada Lambda (`handler.ts`, `admin-handler.ts`) e no núcleo do agente (`agent.ts`, `index.ts`, MCP servers) | chatbot-bff/ + agent/ |
+| 21 | 🟢 Low | `ALLOWED_ORIGIN` documentado como controle de produção, mas ignorado pela infra | chatbot-bff/ |
+| 22 | 🟢 Low | `VITE_COGNITO_REGION` documentado e nunca lido pelo código | chatbot-frontend/ |
+| 23 | 🟢 Low | Sem concorrência reservada/provisionada nas Lambdas | infra/ |
+| 24 | 🟢 Low | Vulnerabilidade *high* em dependência transitiva de dev (`brace-expansion` via `aws-cdk-lib`) | infra/ |
+| 25 | 🟢 Low | `MAX_BODY_LENGTH` não documentado apesar de README afirmar `.env.example` como fonte da verdade | agent/ |
+| 26 | 🟢 Low | `window.__APP_CONFIG__` lido sem validação de forma | chatbot-frontend/ |
+| 27 | 🟢 Low | Sem code-splitting — `AdminPanel` vai no bundle de todo usuário | chatbot-frontend/ |
+
+---
+
+## 1. Segurança
+
+### 1.1 Críticos e altos
+
+**[🔴 Critical] Container do agente roda como root.**
+`agent/Dockerfile` não declara `USER` em nenhum dos dois estágios; `CMD ["npm", "start"]` (linha 37) executa como root dentro de `node:22-slim`. Em um template pensado para pilotos com dados sensíveis, qualquer RCE numa dependência ou ferramenta (a superfície de tools MCP é grande — HTTP, stdio, x402) herda privilégio de root no container por padrão. É uma correção de poucas linhas (`RUN addgroup … && adduser …` + `USER node`) que deveria estar no template desde o início, não deixada para quem adaptar o repo.
+
+**[🟠 High] CORS hard-coded em `*`, com suporte morto para restringi-lo.**
+`infra/src/stacks/bff-stack.ts:50` e `:161` fixam `ALLOWED_ORIGIN: '*'` nas duas Lambdas, sem prop na stack para sobrescrever. O código de `chatbot-bff/src/http.ts` e o `.env.example` sugerem que a origem é configurável — e é, mas só localmente; a infra nunca propaga o valor. Qualquer deploy deste template sai com CORS totalmente aberto, e o README (`chatbot-bff/README.md:38`) documenta a variável como se ela controlasse o comportamento em produção, o que induz a uma falsa sensação de controle.
+
+**[🟠 High] Tokens de sessão Cognito em `localStorage`.**
+`chatbot-frontend/src/lib/auth.ts:18-27` configura o Amplify sem `cookieStorage` nem `tokenProvider` customizado — o v6 usa `localStorage` por padrão para id/access/refresh token. Qualquer XSS (regressão futura, dependência comprometida) lê `localStorage` de forma síncrona e exfiltra o refresh token, que vale muito mais que uma sessão: é *account takeover* completo, não hijack pontual. Não há `dangerouslySetInnerHTML` hoje (o React escapa a saída do agente corretamente), mas a superfície de defesa está zerada — não há CSP (ver #9) para conter um XSS que venha de outro lugar (uma dependência de terceiro, por exemplo).
+
+**[🟠 High] Chave privada de carteira em texto puro, sem Secrets Manager.**
+`agent/.env.example` já avisa: `EVM_PRIVATE_KEY= # DO NOT PUT YOUR KEY IN THE ENV FILE!`. Mas `infra/src/app.ts:72-79` passa `EVM_PRIVATE_KEY` via `pickDefinedEnvironment` direto para `environmentVariables` do `CfnRuntime` (`infra/src/stacks/agent-stack.ts:190-194`) — ou seja, se alguém *seguir* o padrão de configuração do resto do template (variável de ambiente em `infra/.env`) para essa chave, ela fica em texto puro no template CloudFormation e nas variáveis de ambiente do runtime, legível por qualquer principal com `bedrock-agentcore:GetAgentRuntime`. Dentro do agente, `agent/src/agent.ts:32` repassa `process.env` inteiro (não só a chave) para o subprocesso MCP stdio via `env: process.env as Record<string, string>` — superfície de vazamento ainda maior. O aviso no `.env.example` é a única barreira, e é só um comentário.
+
+**[🟠 High] A ferramenta `vanity_address` devolve uma chave privada real na resposta do modelo.**
+`agent/src/mcp-servers/stdio-mcp-server.ts:99-127` chama `Wallet.createRandom()` e ecoa `wallet.privateKey` (linha 121) no texto de retorno da tool — que vai para o contexto do modelo, para o cliente, e potencialmente para logs. Há um aviso de "demo only" (linha 123), mas o padrão em si — gerar e devolver segredos via saída de LLM — é o tipo de atalho que sobrevive a um copy-paste e aparece em produção sem ninguém decidir conscientemente que deveria.
+
+**[🟠 High] Bucket S3 do frontend sem `BlockPublicAccess` explícito, por causa de uma SCP específica do ambiente do autor.**
+`infra/src/stacks/frontend-stack.ts:65-67`:
+```ts
+// NOTE: Current SCP forbids calls to s3:PutBucketPublicAccessBlock.
+// temporarily comment out and leave default configuration behavior (...)
+// blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+```
+Isso é um workaround para uma restrição de organização do autor, deixado *no template*. Quem adotar este repo numa conta sem essa SCP herda um bucket sem bloqueio explícito de acesso público — o comportamento default do S3 hoje ainda costuma ser privado, mas depender do "comportamento padrão" em vez de uma negação explícita é exatamente o tipo de decisão que documentação nenhuma vai flagar até uma mudança futura (bucket policy, ACL, ou uma alteração de padrão da AWS) abrir o bucket. Isso deveria ser condicional a uma flag (`env var` tipo `S3_BLOCK_PUBLIC_ACCESS_UNSUPPORTED`), não um comentário permanente.
+
+**[🟠 High] Duas dependências fixadas em `"latest"`.**
+`agent/package.json` (`@aws-sdk/client-bedrock-agentcore`, `@strands-agents/sdk`) e `chatbot-bff/package.json` (`@aws-sdk/client-bedrock-agentcore`, `@aws-sdk/client-cognito-identity-provider`) usam `"latest"` em vez de um range semver. O lockfile fixa a versão *hoje*, mas qualquer `npm run install:all` (o próprio script de bootstrap do repo) ou regeneração de lockfile — rotina ao clonar o template para um novo projeto — pode puxar uma versão nova sem aviso. Para um SDK que fala com IAM/Bedrock, isso é risco de supply chain e de reprodutibilidade, não só de "quebrar o build".
+
+**[🟠 High] Processos MCP stdio compartilhados são ponto único de falha.**
+`agent/src/agent.ts:14-19,28-34` cria `cryptoToolsMcp` e `oraculoDoBichoMcp` uma vez, em escopo de módulo, reaproveitados por todas as invocações do container. Não há supervisão nem restart automático — se um processo cair, toda sessão subsequente naquele container perde aquela ferramenta até o AgentCore reciclar a instância. Agravado pelo fato de que `vanity_address` roda até 1.000.000 iterações síncronas de `Wallet.createRandom()` (`stdio-mcp-server.ts:98-129`) no mesmo processo compartilhado — uma requisição longa trava as demais.
+
+### 1.2 Médios
+
+- **Prompt injection indireta sem mitigação.** `http-mcp-server.ts` e `x402-mcp-server.ts` devolvem JSON bruto de APIs externas (CoinGecko, backend x402) direto como conteúdo de tool-result, que volta para o contexto do modelo sem sanitização ou allowlist de campos. O system prompt (`agent.ts:60`, "speak like a caveman") não tem nenhuma instrução defensiva contra instruções injetadas via resposta de API comprometida.
+- **Servidor HTTP MCP sem autenticação.** `http-mcp-server.ts:191-219` só valida o header `Host` contra `HTTP_MCP_ALLOWED_HOSTS`; qualquer chamador na rede aceita em `POST /mcp`. Baixo impacto na ferramenta de preço de cripto atual, mas é o padrão que será copiado para a próxima ferramenta MCP interna.
+- **Vazamento de segredo via erro de RPC não tratado.** `agent/src/tools/evm-balance.ts:14` chama `getBalance` sem `try/catch` nem validação de endereço; erros do `ethers`/JSON-RPC costumam embutir a URL da requisição — e `EVM_RPC_URL` do `.env.example` é um endpoint Infura com API key na URL. Um erro de rede vaza a key no texto de erro devolvido ao modelo/usuário.
+- **Sem isolamento de rede para o runtime do agente.** `agent-stack.ts:186-188` fixa `networkMode: 'PUBLIC'`, sem opção de VPC. Para um piloto com dados sensíveis que exija rede privada (requisito comum em compliance), isso é um teto arquitetural do template, não um parâmetro.
+- **Sem WAF** em API Gateway ou CloudFront — nenhuma proteção contra abuso de camada 7 além do throttle de RPS da stage.
+- **Sem MFA no Cognito.** `auth-stack.ts` não configura `mfa`/`mfaSecondFactor`; suportado pelo Cognito, não ligado. Política de senha também é mínima (8 caracteres, sem símbolo obrigatório) — aceitável para demo, insuficiente para dados sensíveis.
+- **Logging não estruturado, sem correlation ID.** `agent/src/index.ts`, os três MCP servers e `chatbot-bff/src/handler.ts`/`local.ts` usam `console.log`/`console.error` com texto livre. Não existe um ID de requisição gerado e propagado do BFF até o agente e seus subprocessos MCP — depurar uma conversa específica de um usuário exige correlacionar timestamps manualmente entre CloudWatch log groups distintos. As permissões de X-Ray concedidas ao runtime (`agent-stack.ts:112-122`, `xray:PutTraceSegments` etc.) não têm nenhuma instrumentação correspondente no código do agente — não foi encontrada nenhuma chamada a X-Ray/OpenTelemetry em `agent/src`, então essas permissões hoje não têm efeito prático a menos que o runtime gerenciado do AgentCore instrumente automaticamente (não verificável a partir do código deste repo).
+- **Sem telemetria de erro no frontend.** Nenhuma integração tipo Sentry; erros do cliente só aparecem transitoriamente na UI e desaparecem — em produção, uma falha recorrente do lado do browser é invisível para quem opera o sistema.
+
+### 1.3 Pontos fortes de segurança (vale registrar, não só os problemas)
+
+- **Escopo de IAM do `authenticatedRole` corrigido corretamente.** `auth-stack.ts:245-251` documenta explicitamente uma regressão anterior (a role chegou a carregar `bedrock-agentcore:InvokeAgentRuntime` em `*`, permitindo que qualquer usuário logado invocasse *qualquer* runtime da conta) e a correção — permissão concedida só pelo `agent-stack.ts`, escopada ao ARN do runtime específico — é o padrão certo, e há teste de assertions (`infra/src/__tests__/stacks.test.ts`) travando essa propriedade especificamente para não regredir de novo.
+- **Sessões namespaced por `sub` do Cognito.** `chatbot-bff/src/session.ts:32-48` — um session id só é reaproveitado se pertencer ao chamador autenticado; caso contrário um novo é emitido silenciosamente. Fecha o vetor de session hijacking entre usuários.
+- **Autorização de admin corretamente feita a partir de claims validadas pelo API Gateway**, nunca de um header decodificado manualmente (`admin.ts:89-94`), com auditoria estruturada de toda chamada admin — permitida, negada ou com erro (`admin.ts:203-242`).
+- **Separação de função Lambda para admin vs. chat**, para que a função que retransmite saída do modelo nunca carregue `cognito-idp:AdminCreate*`.
+- **Nenhum segredo hardcoded** encontrado em nenhum dos quatro pacotes; credenciais AWS vêm de IAM role, não de chaves estáticas.
+- **Nenhum XSS de saída do LLM** — a saída do agente é renderizada como children JSX (React escapa automaticamente), sem `dangerouslySetInnerHTML` em lugar nenhum do frontend.
+
+---
+
+## 2. Escalabilidade
+
+| Achado | Severidade | Nota |
+|---|---|---|
+| MCP stdio compartilhado sem supervisão/restart | Alta (já contada acima) | Ver 1.1 |
+| Sem timeout por requisição no agente | Média | `agent/src/index.ts:37-45` faz stream sem wrapper de timeout; uma tool ou chamada de modelo travada segura a resposta HTTP indefinidamente. |
+| Sem concorrência reservada/provisionada nas Lambdas | Baixa | Nada em `bff-stack.ts` configura `reservedConcurrentExecutions`; aceitável numa demo, mas numa conta compartilhada a Lambda de chat pode roubar concorrência de outras funções sem aviso. |
+| Streaming de resposta bem implementado | Positivo | `handler.ts` usa `awslambda.streamifyResponse` corretamente pareado com `ResponseTransferMode.STREAM` na integração do API Gateway (`bff-stack.ts:131`); timeouts bem calibrados (60s para chat que streama, 29s para admin, alinhado ao teto de 29s do API Gateway REST buffered). |
+| Clientes AWS SDK reaproveitados entre invocações | Positivo | `BedrockAgentCoreClient` e `CognitoIdentityProviderClient` instanciados em escopo de módulo — padrão correto para evitar overhead de reconexão em cada cold start. |
+| Design "um `Agent` por request, `BedrockModel` compartilhado" | Positivo | `agent.ts:36-64` evita vazamento de estado de conversa entre requisições concorrentes, sem pagar o custo de recriar o client Bedrock a cada chamada — trade-off correto e documentado. |
+| Rate limiting só a nível de conta, não por usuário | Média (já contada) | Ver seção de segurança — o único freio é o throttle global da stage; sem quota por `sub`. |
+
+No geral, a arquitetura serverless (Lambda + AgentCore Runtime gerenciado + CloudFront/S3) escala horizontalmente por padrão — não há estado de servidor a gerenciar. O gargalo real de escalabilidade é o *design de tooling* do agente (processos MCP stdio compartilhados e sem timeout), não a infraestrutura em si.
+
+---
+
+## 3. Monitoramento & Logs da aplicação
+
+**O que existe:**
+- Alarmes CloudWatch para erros da Lambda de chat, Lambda de admin e 5XX da API Gateway (`bff-stack.ts:212-236`), com tópico SNS opcional por e-mail.
+- Orçamento AWS Budget opcional (80%/100%) — alerta, não bloqueia gasto.
+- Access logs da API Gateway sempre ativos, deliberadamente só com identidade e resultado (`requestId`, `status`, `latencyMs`, `sourceIp`, `actorSub`) — **nunca** o corpo da requisição (`dataTraceEnabled` desligado de propósito, comentário explícito em `bff-stack.ts:73-75`). Essa é uma decisão de design correta e rara de ver documentada tão claramente.
+- Log de auditoria estruturado (JSON) para toda ação administrativa, com ator/ação/resultado (`admin.ts`).
+
+**O que falta:**
+- **Nenhum correlation ID** atravessando frontend → BFF → AgentCore → MCP subprocess. A única correlação disponível é o `requestId` do API Gateway, que não é ecoado ao cliente nem anexado à chamada ao AgentCore.
+- **Nenhuma instrumentação de tracing** (X-Ray, OpenTelemetry) no código, apesar da IAM policy do runtime do agente já conceder permissões de X-Ray — permissão concedida, capacidade não usada.
+- **Logging não estruturado no agente e no BFF** (`console.log`/`console.error` com texto livre) — dificulta parsing/alerta automatizado em CloudWatch Logs Insights.
+- **Nenhuma telemetria de erro no frontend** — sem Sentry ou equivalente, incidentes do lado do cliente não geram nenhum sinal para operação.
+- **Erros brutos passados para `console.error`** no BFF (`handler.ts:109`, `local.ts:111`) sem uma auditoria explícita de que payload de prompt nunca vaza para dentro do objeto de erro — funciona hoje porque os SDKs da AWS não embutem o corpo da requisição em suas exceções, mas não há teste que trave essa garantia, e é um regression path fácil.
+
+Resumo: a telemetria de **infraestrutura** (alarmes, orçamento, access log de borda) é sólida. A telemetria de **aplicação** (rastreamento de requisição ponta a ponta, logs estruturados, erro de cliente) é o elo fraco — hoje, investigar "por que a conversa do usuário X falhou às 14:32" exige garimpar múltiplos log groups sem um ID comum.
+
+---
+
+## 4. Boas práticas, qualidade de código e testes
+
+**Pontos fortes:**
+- TypeScript `strict: true` herdado de `tsconfig.base.json` em todos os quatro pacotes.
+- ESLint com `typescript-eslint/strict` no repo inteiro.
+- Separação clara de lógica pura vs. glue code (ex: `chatbot-bff` separa `admin.ts`/`http.ts`/`session.ts` puros de `handler.ts`/`admin-handler.ts` como adaptadores Lambda).
+- Testes com Vitest em todos os pacotes, sem dependência de credenciais AWS/Docker/browser para rodar — `npm test` funciona isolado.
+- Comentários no código, quando existem, explicam o *porquê* de decisões não óbvias (ex: por que `authenticatedRole` não recebe policy na própria stack, por que duas `BucketDeployment` separadas, por que o atributo se chama `inviteLocale` e não `locale`) — nível de documentação de decisão de arquitetura acima da média.
+- `npm audit` limpo (0 vulnerabilidades) em `agent/`, `chatbot-bff/` e `chatbot-frontend/`.
+
+**Gaps:**
+- **Sem pipeline de CI.** Não há `.github/workflows` nem qualquer outro CI configurado. `npm run verify` (lint + typecheck + test) existe como script, mas nada o executa automaticamente em PR — depende inteiramente de disciplina manual de quem contribui. Para um template que se propõe a acelerar entrega de vários projetos, isso é uma lacuna estrutural: cada fork herda a ausência de CI, não só o código.
+- **Testes concentrados na lógica mais fácil de isolar, não na superfície de maior risco:**
+  - Em `chatbot-bff`, `handler.ts` e `admin-handler.ts` — os pontos de entrada Lambda reais, onde a checagem de claims/autorização de fato acontece — não têm teste direto. As funções puras que eles chamam (`isAdminClaims`, `resolveSessionId`) são bem testadas isoladamente, mas nada garante que o handler continua *chamando* essas funções corretamente após um refactor futuro.
+  - Em `agent/`, não há teste para `agent.ts` (wiring de tools/MCP), `index.ts` (a superfície HTTP real, streaming, tratamento de erro) nem para nenhum dos três MCP servers — exatamente as partes com mais interação externa e mais tratamento de erro.
+- **Vulnerabilidade *high* em dependência transitiva de dev em `infra/`** (`brace-expansion` via `aws-cdk-lib`, DoS). Baixo impacto real (é dependência de build da CLI do CDK, não vai para runtime), mas confirma que ninguém roda `npm audit` como parte de um processo automatizado — de novo, sintoma da ausência de CI.
+- **Sem `LICENSE`, `SECURITY.md` ou `CODEOWNERS`** no repositório — para um template que se pretende reutilizável por outros times, a ausência de um `SECURITY.md` (como reportar uma vulnerabilidade encontrada no template) é uma lacuna simples de fechar.
+
+---
+
+## 5. Coerência da documentação
+
+A documentação deste repositório é, em geral, **incomumente honesta e detalhada** para um projeto de referência — o root README já avisa "not a production-ready template" e cada README de pacote documenta variáveis de ambiente, decisões de arquitetura e até o motivo de escolhas não óbvias (ex: por que os e-mails do Cognito caem em spam, e como corrigir com SES). Isso é raro e deveria ser preservado. As inconsistências encontradas são pontuais, não estruturais:
+
+| Documento | Inconsistência | Severidade |
+|---|---|---|
+| `chatbot-bff/README.md:38` | Documenta `ALLOWED_ORIGIN` como se controlasse CORS em produção; a infra hard-coda `'*'` e ignora a variável nesse caminho. | Baixa |
+| `chatbot-frontend/.env.example:15` + `README.md:68` | Lista `VITE_COGNITO_REGION` como variável obrigatória; nunca é lida em nenhum lugar do código-fonte (a variável realmente usada é `VITE_AWS_REGION`). | Baixa |
+| `agent/README.md` | Não documenta `MAX_BODY_LENGTH` (`agent/src/limits.ts:11`), apesar de o README afirmar que `.env.example` é "a fonte da verdade" para variáveis de ambiente. | Baixa |
+| `agent/README.md:85-89` | O exemplo de `docker run` só passa `EXCHANGE_RATE_MCP_URL`, mas `evmBalanceTool` e `oraculoDoBichoMcp` são incluídos incondicionalmente em todo agente (`agent.ts:62`) e dependem de `EVM_RPC_URL`/`EVM_PRIVATE_KEY`/`X402_APP_URL` — o comportamento quando essas variáveis faltam não é documentado. | Baixa |
+| `infra/README.md` | Não menciona a lacuna de segurança do `EVM_PRIVATE_KEY` (achado #4) nem o comentário sobre `BlockPublicAccess` desabilitado (achado #6) — ambos são decisões/riscos que um operador que só lê o README nunca veria. | Média (é uma omissão que esconde risco, não um erro factual) |
+| Root `README.md` — seção "Testing" | Verificado linha a linha contra os arquivos de teste reais dos quatro pacotes: **as alegações batem** com o código (inclusive a lista específica de o que `agent/`, `chatbot-bff/`, `infra/` e `chatbot-frontend/` cobrem, e o que deliberadamente não cobrem). Nenhuma divergência encontrada aqui. | — |
+| `infra/README.md` | Descrição de guardrails, emails, grupos de admin e modo de auth batem com o código correspondente em `config.ts`/`auth-stack.ts`/`bff-stack.ts`. | — |
+| `chatbot-frontend/README.md` | Descrição de i18n, autorização de admin (client-side é cosmético, BFF revalida) e modo de sign-up batem com o código. | — |
+
+Conclusão sobre documentação: coerente na maior parte, com gaps pequenos e fáceis de corrigir. O gap mais importante não é uma frase errada — é a **ausência** de qualquer aviso, no README de infra ou no root, sobre o tratamento inseguro do `EVM_PRIVATE_KEY` e sobre o CORS aberto por padrão, que são exatamente os dois achados que mais importam para alguém avaliando "posso rodar isso com dados sensíveis?".
+
+---
+
+## Recomendações priorizadas
+
+### P0 — bloqueadores para qualquer piloto com dados sensíveis
+1. Adicionar `USER` não-root ao `agent/Dockerfile`.
+2. Tornar `ALLOWED_ORIGIN` de fato configurável na infra (prop de stack + env var), com default restrito em vez de `'*'`.
+3. Mover tokens do Cognito para armazenamento em memória ou cookie `httpOnly`/`secure` no frontend, e adicionar uma `ResponseHeadersPolicy` de CSP/HSTS no CloudFront como camada de defesa adicional.
+4. Tratar `EVM_PRIVATE_KEY` (e qualquer segredo equivalente que um projeto derivado venha a adicionar) via Secrets Manager, nunca como env var de runtime em texto puro — e remover ou isolar claramente a tool `vanity_address` do conjunto de ferramentas padrão.
+5. Substituir o comentário de `BlockPublicAccess` por uma flag explícita (`S3_BLOCK_PUBLIC_ACCESS=false` documentada como "só use se sua conta tem uma SCP que force isso"), mantendo `BLOCK_ALL` como default real.
+6. Fixar `agent/package.json` e `chatbot-bff/package.json` em versões semver reais, não `"latest"`.
+
+### P1 — antes de adoção mais ampla por outros times
+7. Configurar CI (lint + typecheck + test + `npm audit` em PR) — o script `verify` já existe, falta só o gatilho.
+8. Adicionar rate limit por usuário/sessão no BFF (não só o throttle global de API Gateway).
+9. Instrumentar correlation ID ponta a ponta (frontend → BFF → agente → MCP), e decidir conscientemente se X-Ray/OpenTelemetry entra ou se as permissões de X-Ray já concedidas devem ser removidas.
+10. Cobrir com teste os pontos de entrada reais (`handler.ts`, `admin-handler.ts`, `agent.ts`, `index.ts`) — hoje o teste está concentrado na lógica pura ao redor deles, não neles.
+11. Adicionar telemetria de erro no frontend (Sentry ou equivalente).
+12. Habilitar MFA opcional no Cognito e revisar a política de senha para um contexto de dados sensíveis.
+
+### P2 — robustez geral
+13. Adicionar timeout por requisição no agente e supervisão/restart para os processos MCP stdio compartilhados.
+14. WAF básico em API Gateway/CloudFront se o piloto for exposto publicamente.
+15. `SECURITY.md` e `LICENSE` no repositório.
+16. Corrigir as três divergências pontuais de documentação listadas na seção 5.
+
+---
+
+## Conclusão
+
+Como **template de referência para aprender e prototipar** os dois padrões de integração com Bedrock AgentCore, este repositório cumpre muito bem o que promete: a separação entre modo direto e modo BFF é didática, a infraestrutura sobe de ponta a ponta com um comando, e várias decisões de segurança (escopo de IAM, namespacing de sessão, separação de função admin/chat, guardrails de custo) foram claramente pensadas por alguém que já foi mordido por essas classes de bug antes — os comentários no código *documentam regressões passadas e por que a correção atual existe*, o que é um sinal de maturidade de engenharia real.
+
+Como **bootstrapper para um piloto em produção com dados sensíveis**, ainda não está pronto — não porque falte estrutura, mas porque um punhado de decisões concretas e corrigíveis (container root, CORS aberto, segredo de carteira em texto puro, tokens em `localStorage`, dependências em `latest`) ficariam silenciosamente copiadas para todo projeto que nascer deste template, exatamente porque o restante do repositório parece tão bem cuidado que ninguém teria motivo para desconfiar dessas partes específicas. A lista P0 acima é pequena e objetiva — endereçá-la é o que separa "bom material de referência" de "base seguro para copiar e escalar".
