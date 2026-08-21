@@ -45,13 +45,41 @@ Use [agent/.env.example](.env.example) as the source of truth. The most importan
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `AWS_REGION` | Yes | AWS region for Bedrock and runtime behavior |
-| `BEDROCK_MODEL_ID` | Yes | Model used by the Strands agent |
+| `MODEL_PROVIDER` | No | `bedrock` (default) or `ollama` — see [Running against a local Ollama model](#running-against-a-local-ollama-model) |
+| `AWS_REGION` | Yes (bedrock) | AWS region for Bedrock and runtime behavior |
+| `BEDROCK_MODEL_ID` | Yes (bedrock) | Model used by the Strands agent |
 | `EXCHANGE_RATE_MCP_URL` | No | HTTP MCP server URL for exchange-rate tooling |
 | `EVM_RPC_URL` | No | RPC endpoint used by EVM-related tools |
 | `X402_APP_URL` | No | Remote x402 service endpoint |
 | `EVM_PRIVATE_KEY` | No | Development-only key for x402 flows |
 | `AGENT_RUNTIME_ARN` | For `invoke:bedrock` | Target deployed runtime ARN |
+| `OLLAMA_BASE_URL` | Yes (ollama) | Ollama server's OpenAI-compatible endpoint, e.g. `http://localhost:11434/v1` |
+| `OLLAMA_MODEL_ID` | Yes (ollama) | Ollama model tag, e.g. `qwen3:1.7b` |
+
+### Running against a local Ollama model
+
+Set `MODEL_PROVIDER=ollama` to swap the Bedrock model for a local Ollama server, talking to its
+OpenAI-compatible endpoint (`/v1/chat/completions`) rather than Ollama's native `/api/chat`. In this
+mode the agent only wires up `calculator` and `letterCounter` — no crypto/EVM tools, no MCP servers,
+no AWS credentials needed. The model must support OpenAI-style tool/function calling for the agent's
+tool-use loop to work; small models may not invoke tools reliably.
+
+```bash
+# if Ollama is listening on a non-default port, set OLLAMA_BASE_URL to match
+OLLAMA_HOST=127.0.0.1:11435 ollama serve
+
+# .env
+MODEL_PROVIDER=ollama
+OLLAMA_BASE_URL="http://localhost:11435/v1"
+OLLAMA_MODEL_ID=qwen3:1.7b
+```
+
+```bash
+npm run dev
+curl --location 'http://localhost:8080/invocations' \
+  --header 'Content-Type: application/octet-stream' \
+  --data 'How many times does the letter s appear in satoshi?'
+```
 
 ## Quick checks
 
