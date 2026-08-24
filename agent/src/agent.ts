@@ -6,6 +6,7 @@ import { calculatorTool } from './tools/calculator'
 import { evmBalanceTool } from './tools/evm-balance'
 import { letterCounterTool } from './tools/letter-counter'
 
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
@@ -34,6 +35,29 @@ const oraculoDoBichoMcp = new strands.McpClient({
 })
 
 /**
+ * Root directory for per-session conversation snapshots.
+ *
+ * Production deployments on AgentCore should point this at a persistent volume or swap FileStorage
+ * for a distributed backend (e.g. S3, DynamoDB) so history survives container restarts and scales
+ * across multiple replicas. `/tmp` is fine for single-container deployments and local development.
+ *
+ * Known limitation: FileStorage has no TTL — old session snapshots accumulate on disk until the
+ * container is recycled. A distributed backend should implement its own expiry (e.g. DynamoDB TTL).
+ */
+const SESSION_STORAGE_DIR = process.env.SESSION_STORAGE_DIR ?? '/tmp/strands-sessions'
+
+/**
+ * Maps an arbitrary AgentCore session ID to a FileStorage-safe identifier.
+ *
+ * AgentCore session IDs contain colons (`namespace:uuid`) which FileStorage's validateIdentifier
+ * rejects. SHA-256 produces a 64-char lowercase hex string that always passes validation and
+ * preserves the 1-to-1 mapping between session IDs and storage paths.
+ */
+function sessionKey(sessionId: string): string {
+  return createHash('sha256').update(sessionId).digest('hex')
+}
+
+/**
  * Shared across requests on purpose: `BedrockModel`'s constructor builds a `BedrockRuntimeClient`,
  * so a per-request model would mean a per-request connection pool and a TLS handshake on the
  * critical path of every call. The client itself is stateless between invocations — unlike the
@@ -54,12 +78,23 @@ const bedrockModel = new strands.BedrockModel({
  *
  * The agent object itself is cheap to allocate — a prompt, a tool list and an empty array — the
  * expensive part, the Bedrock client, is the module-level `bedrockModel` shared above.
+ *
+ * Per-session conversation history is restored and saved automatically by the `SessionManager`.
+ * AgentCore injects the caller's `runtimeSessionId` into every `/invocations` request as
+ * `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, so the same session ID always maps to the same
+ * snapshot on disk, giving the agent a full view of the ongoing conversation.
  */
-export function createAgent(): strands.Agent {
+export function createAgent(sessionId: string): strands.Agent {
+  const sessionManager = new strands.SessionManager({
+    sessionId: sessionKey(sessionId),
+    storage: { snapshot: new strands.FileStorage(SESSION_STORAGE_DIR) },
+  })
+
   return new strands.Agent({
     systemPrompt: `speak like a caveman`,
     model: bedrockModel,
     tools: [calculatorTool, letterCounterTool, evmBalanceTool, cryptoToolsMcp, oraculoDoBichoMcp, ...(exchangeRateMcp ? [exchangeRateMcp] : [])],
+    sessionManager,
   })
 }
 

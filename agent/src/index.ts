@@ -1,4 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from 'express'
+import { randomUUID } from 'node:crypto'
 import { createAgent } from './agent'
 import { MAX_BODY_BYTES, MAX_BODY_LENGTH } from './limits'
 
@@ -33,8 +34,15 @@ app.post(
       res.setHeader('Connection', 'keep-alive')
       res.flushHeaders()
 
+      // AgentCore injects this header; the value is authoritative only because this container is
+      // not publicly reachable — direct exposure would let any caller forge it and read another
+      // user's history. Fall back to a random id for local dev where the header is absent.
+      const sessionId =
+        (req.headers['x-amzn-bedrock-agentcore-runtime-session-id'] as string | undefined)
+        ?? randomUUID()
+
       // A fresh agent per request — see the comment on createAgent() for why one must not be shared.
-      const stream = createAgent().stream(prompt)
+      const stream = createAgent(sessionId).stream(prompt)
 
       for await (const event of stream) {
         const json = JSON.stringify(event)
